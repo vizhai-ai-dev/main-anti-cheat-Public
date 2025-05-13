@@ -1,0 +1,51 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+.env
+.venv
+.python-version
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Node/React
+node_modules/
+/build
+/dist
+.npm
+.eslintcache
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Test data
+test_data/
+**/test_videos/
+**/test_results/
+**/test_outputs/
+
+# Uploaded videos
+uploaded_videos/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Docker
+.dockerignore
+
+# Logs
+logs/
+*.log 
