@@ -32,7 +32,7 @@ The easiest way to run VIZH.AI is using Docker and Docker Compose.
 
 1. Clone this repository:
    ```bash
-   git clone <repository-url>
+   git clone https://github.com/darshanjijhu/main-anti-cheat-Public.git
    cd vizhai
    ```
 
