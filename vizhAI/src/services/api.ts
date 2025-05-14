@@ -2,7 +2,7 @@ import axios from 'axios';
 
 // Create axios instance with base URL and default configs
 const api = axios.create({
-  baseURL: process.env.REACT_APP_API_URL || '/api',
+  baseURL: process.env.REACT_APP_API_URL || 'http://localhost:8000',
   headers: {
     'Content-Type': 'application/json',
   },
@@ -22,35 +22,57 @@ export interface AnalysisReport {
   final_score: number;
   risk: 'Low' | 'Medium' | 'High' | 'Very High';
   reasons: string[];
-  screen_switch?: {
-    fullscreen_violations: number;
-    switch_count: number;
-  };
   gaze?: {
     off_screen_count: number;
     average_confidence: number;
+    off_screen_time_percentage?: number;
+    gaze_direction_timeline?: Array<{
+      timestamp: string;
+      direction: string;
+    }>;
+    score: number;
   };
   audio?: {
     multiple_speakers: boolean;
     keyboard_typing_count: number;
     silence_percentage: number;
+    background_noise_level?: string;
+    speaking_timeline?: Array<{
+      start: string;
+      end: string;
+      speaker: string;
+    }>;
+    score: number;
   };
   multi_person?: {
     max_people_detected: number;
     time_with_multiple_people: number;
+    people_detection_timeline?: Array<{
+      timestamp: string;
+      count: number;
+    }>;
+    different_faces_detected: number;
+    different_face_timestamps: string[];
+    has_different_faces: boolean;
+    score: number;
   };
   lip_sync?: {
     lip_sync_score: number;
     major_lip_desync_detected: boolean;
+    lip_sync_timeline?: Array<{
+      timestamp: string;
+      score: number;
+    }>;
+    score: number;
   };
   module_scores: {
-    screen_switch: number;
     gaze: number;
     audio: number;
     multi_person: number;
     lip_sync: number;
   };
   processing_time: number;
+  video_duration?: string;
 }
 
 // API functions

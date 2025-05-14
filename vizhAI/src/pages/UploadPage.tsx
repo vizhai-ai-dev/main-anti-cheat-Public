@@ -2,6 +2,8 @@ import React, { useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useDropzone } from 'react-dropzone';
 import { uploadVideo } from '../services/api';
+import api from '../services/api';
+import { AxiosError } from 'axios';
 
 const UploadPage: React.FC = () => {
   const navigate = useNavigate();
@@ -72,6 +74,59 @@ const UploadPage: React.FC = () => {
     setUploading(false);
     setUploadProgress(0);
     setError(null);
+  };
+
+  // Add a function to handle demo analysis
+  const handleDemoAnalysis = async () => {
+    // Initialize progressInterval outside the try block
+    let progressInterval: NodeJS.Timeout | null = null;
+    
+    try {
+      setUploading(true);
+      setError(null);
+      
+      // Simulate upload progress for demo
+      progressInterval = setInterval(() => {
+        setUploadProgress(prev => {
+          if (prev >= 95) {
+            if (progressInterval) clearInterval(progressInterval);
+            return 95;
+          }
+          return prev + 10;
+        });
+      }, 300);
+
+      // Call the demo endpoint
+      const response = await api.post('/demo-analysis');
+      
+      if (progressInterval) clearInterval(progressInterval);
+      setUploadProgress(100);
+      
+      // Navigate to the report page
+      setTimeout(() => {
+        navigate(`/report/${response.data.id}`);
+      }, 500);
+      
+    } catch (err) {
+      if (progressInterval) clearInterval(progressInterval);
+      setUploading(false);
+      setUploadProgress(0);
+      console.error('Demo error:', err);
+      
+      // More detailed error message with proper typing
+      const axiosError = err as AxiosError<{detail?: string}>;
+      if (axiosError.response) {
+        // The request was made and the server responded with a status code
+        // that falls out of the range of 2xx
+        setError(`Server error: ${axiosError.response.status} - ${axiosError.response.data?.detail || 'Failed to create demo'}`);
+      } else if (axiosError.request) {
+        // The request was made but no response was received
+        setError('Could not connect to server. Please make sure the backend is running.');
+      } else {
+        // Something happened in setting up the request that triggered an Error
+        setError(`Error: ${axiosError.message}`);
+      }
+    }
   };
 
   return (
@@ -167,6 +222,15 @@ const UploadPage: React.FC = () => {
             disabled
           >
             Uploading...
+          </button>
+        )}
+        
+        {!file && !uploading && (
+          <button 
+            className="btn-secondary"
+            onClick={handleDemoAnalysis}
+          >
+            Try Demo Analysis
           </button>
         )}
       </div>

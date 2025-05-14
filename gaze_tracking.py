@@ -181,4 +181,4 @@ async def gaze_tracking_endpoint(request: VideoRequest):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8001)  # Using port 8001 to avoid conflict with screen_switch 
+    uvicorn.run(app, host="0.0.0.0", port=8001)  # Using port 8001 

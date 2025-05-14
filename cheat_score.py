@@ -45,11 +45,10 @@ class CheatScoreCalculator:
         
         # Feature weights for rule-based scoring
         self.WEIGHTS = {
-            "screen_switch": 0.25,
-            "gaze": 0.25,
-            "audio": 0.20,
-            "multi_person": 0.20,
-            "lip_sync": 0.10
+            "gaze": 0.35,
+            "audio": 0.25,
+            "multi_person": 0.25,
+            "lip_sync": 0.15
         }
     
     def _normalize_score(self, value, min_val=0, max_val=100):
@@ -70,14 +69,6 @@ class CheatScoreCalculator:
     def _generate_reasons(self, results):
         """Generate plain text reasons for flagging"""
         reasons = []
-        
-        # Screen switch reasons
-        if "screen_switch" in results:
-            screen = results["screen_switch"]
-            if screen.get("fullscreen_violations", 0) > 0:
-                reasons.append(f"Fullscreen violated {screen.get('fullscreen_violations')} times")
-            if screen.get("switch_count", 0) > 3:
-                reasons.append(f"Switched screens {screen.get('switch_count')} times")
         
         # Gaze reasons
         if "gaze" in results:
@@ -102,6 +93,9 @@ class CheatScoreCalculator:
                 reasons.append(f"Maximum of {multi.get('max_people_detected')} people detected")
             if multi.get("time_with_multiple_people", 0) > 10:
                 reasons.append(f"Multiple people present for {multi.get('time_with_multiple_people'):.1f} seconds")
+            if multi.get("has_different_faces", False):
+                diff_faces = multi.get("different_faces_detected", 0)
+                reasons.append(f"{diff_faces} different {'face' if diff_faces == 1 else 'faces'} detected (potential identity switching)")
         
         # Lip sync reasons
         if "lip_sync" in results:
@@ -116,15 +110,6 @@ class CheatScoreCalculator:
     def _rule_based_scoring(self, results):
         """Calculate cheating score using rule-based approach"""
         scores = {}
-        
-        # Calculate screen switching score
-        if "screen_switch" in results:
-            screen_data = results["screen_switch"]
-            fullscreen_score = 100 - min(100, screen_data.get("fullscreen_violations", 0) * 20)
-            switch_score = 100 - min(100, screen_data.get("switch_count", 0) * 10)
-            scores["screen_switch"] = (fullscreen_score * 0.7 + switch_score * 0.3)
-        else:
-            scores["screen_switch"] = 100  # Perfect score if no data
         
         # Calculate gaze score
         if "gaze" in results:
@@ -150,7 +135,14 @@ class CheatScoreCalculator:
             multi_data = results["multi_person"]
             people_score = 100 if multi_data.get("max_people_detected", 0) <= 1 else 0
             time_score = 100 - min(100, multi_data.get("time_with_multiple_people", 0) * 5)
-            scores["multi_person"] = (people_score * 0.7 + time_score * 0.3)
+            
+            # Apply severe penalty for different faces detected
+            face_switching_penalty = 0
+            if multi_data.get("has_different_faces", False):
+                face_switching_penalty = min(100, multi_data.get("different_faces_detected", 0) * 30)
+            
+            # Combine scores with heavier weight on face switching
+            scores["multi_person"] = max(0, (people_score * 0.3 + time_score * 0.2 - face_switching_penalty))
         else:
             scores["multi_person"] = 100
         
@@ -189,11 +181,6 @@ class CheatScoreCalculator:
                 
             # Extract features from results
             features = []
-            
-            # Screen switch features
-            screen_data = results.get("screen_switch", {})
-            features.append(screen_data.get("fullscreen_violations", 0))
-            features.append(screen_data.get("switch_count", 0))
             
             # Gaze features
             gaze_data = results.get("gaze", {})
@@ -264,7 +251,6 @@ class CheatScoreCalculator:
 app = FastAPI()
 
 class CheatScoreRequest(BaseModel):
-    screen_switch: Optional[Dict] = None
     gaze: Optional[Dict] = None
     audio: Optional[Dict] = None
     multi_person: Optional[Dict] = None

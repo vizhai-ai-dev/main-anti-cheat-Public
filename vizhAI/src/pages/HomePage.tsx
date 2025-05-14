@@ -1,7 +1,29 @@
 import React from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
+import api from '../services/api';
+import { AxiosError } from 'axios';
 
 const HomePage: React.FC = () => {
+  const navigate = useNavigate();
+
+  const handleDemoAnalysis = async () => {
+    try {
+      const response = await api.post('/demo-analysis');
+      const { id } = response.data;
+      navigate(`/report/${id}`);
+    } catch (error) {
+      console.error('Error creating demo analysis:', error);
+      const axiosError = error as AxiosError<{detail?: string}>;
+      if (axiosError.response) {
+        alert(`Server error: ${axiosError.response.status} - ${axiosError.response.data?.detail || 'Failed to create demo'}`);
+      } else if (axiosError.request) {
+        alert('Could not connect to server. Please make sure the backend is running.');
+      } else {
+        alert(`Error: ${axiosError.message}`);
+      }
+    }
+  };
+
   return (
     <div className="w-full">
       {/* Hero Section */}
@@ -125,7 +147,7 @@ const HomePage: React.FC = () => {
             <span className="block">Ready to analyze your videos?</span>
             <span className="block text-primary-600">Start using VIZH.AI today.</span>
           </h2>
-          <div className="mt-8 flex lg:mt-0 lg:flex-shrink-0">
+          <div className="mt-8 flex lg:mt-0 lg:flex-shrink-0 space-x-4">
             <div className="inline-flex rounded-md shadow">
               <Link
                 to="/upload"
@@ -133,6 +155,14 @@ const HomePage: React.FC = () => {
               >
                 Get started
               </Link>
+            </div>
+            <div className="inline-flex rounded-md shadow">
+              <button
+                onClick={handleDemoAnalysis}
+                className="btn bg-secondary-600 hover:bg-secondary-700 text-white px-6 py-3"
+              >
+                Try Demo
+              </button>
             </div>
           </div>
         </div>

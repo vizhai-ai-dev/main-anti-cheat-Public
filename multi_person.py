@@ -1,12 +1,13 @@
 import cv2
 import numpy as np
 from ultralytics import YOLO
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional
 import logging
 from datetime import datetime, timedelta
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import time
+import face_recognition
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -21,6 +22,13 @@ class MultiPersonDetector:
         self.CONFIDENCE_THRESHOLD = 0.5  # Minimum confidence for person detection
         self.SAMPLE_INTERVAL = 0.5  # Sample frames every 0.5 seconds
         self.MIN_PERSON_HEIGHT = 100  # Minimum height in pixels to consider a detection valid
+        self.FACE_RECOGNITION_INTERVAL = 1.0  # Sample frames for face recognition every 1 second
+        self.FACE_MATCHING_THRESHOLD = 0.6  # Threshold for face comparison (lower is stricter)
+        
+        # Store reference face
+        self.reference_face_encoding = None
+        self.different_faces_detected = 0
+        self.different_faces_timestamps = []
         
     def _is_valid_person_detection(self, box: List[float], frame_height: int) -> bool:
         """Check if a detection is a valid person based on size and position."""
@@ -36,8 +44,40 @@ class MultiPersonDetector:
         """Convert seconds to HH:MM:SS format."""
         return str(timedelta(seconds=int(seconds)))
     
+    def _extract_face_encodings(self, frame) -> List:
+        """Extract face encodings from a frame."""
+        # Convert BGR to RGB for face_recognition library
+        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        
+        # Find face locations
+        face_locations = face_recognition.face_locations(rgb_frame)
+        
+        # If no faces found, return empty list
+        if not face_locations:
+            return []
+        
+        # Get face encodings
+        face_encodings = face_recognition.face_encodings(rgb_frame, face_locations)
+        
+        return face_encodings
+    
+    def _is_different_face(self, face_encoding) -> bool:
+        """Check if the face encoding is different from the reference face."""
+        if self.reference_face_encoding is None:
+            # This is the first face, set it as reference
+            self.reference_face_encoding = face_encoding
+            logger.info("Reference face detected and stored")
+            return False
+        
+        # Compare with reference face
+        # face_distance returns a numpy array with the distance for each face in the reference
+        face_distances = face_recognition.face_distance([self.reference_face_encoding], face_encoding)
+        
+        # If the distance is greater than the threshold, it's a different face
+        return face_distances[0] > self.FACE_MATCHING_THRESHOLD
+    
     def detect_multiple_persons(self, video_path: str) -> Dict:
-        """Main function to detect multiple persons in a video."""
+        """Main function to detect multiple persons in a video and track faces."""
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
             raise ValueError("Could not open video file")
@@ -47,6 +87,7 @@ class MultiPersonDetector:
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         frame_interval = 1.0 / fps
         sample_frame_interval = int(self.SAMPLE_INTERVAL * fps)
+        face_recognition_interval = int(self.FACE_RECOGNITION_INTERVAL * fps)
         
         logger.info(f"Video FPS: {fps}, Total Frames: {total_frames}")
         
@@ -56,6 +97,7 @@ class MultiPersonDetector:
         first_extra_person_time = None
         current_time = 0
         frame_count = 0
+        last_different_face_time = None
         
         while cap.isOpened():
             ret, frame = cap.read()
@@ -64,7 +106,23 @@ class MultiPersonDetector:
             
             frame_count += 1
             
-            # Sample frames at specified interval
+            # Process for face recognition at specified intervals
+            if frame_count % face_recognition_interval == 0:
+                face_encodings = self._extract_face_encodings(frame)
+                
+                # If faces found, check if they're different from reference
+                for face_encoding in face_encodings:
+                    if self._is_different_face(face_encoding):
+                        self.different_faces_detected += 1
+                        timestamp = self._format_timestamp(current_time)
+                        self.different_faces_timestamps.append(timestamp)
+                        logger.info(f"Different face detected at {timestamp}")
+                        
+                        # Record the first time a different face is detected
+                        if last_different_face_time is None:
+                            last_different_face_time = current_time
+            
+            # Sample frames at specified interval for person detection
             if frame_count % sample_frame_interval == 0:
                 # Run YOLOv8 detection
                 results = self.model(frame, classes=[0])  # class 0 is person in COCO dataset
@@ -92,19 +150,29 @@ class MultiPersonDetector:
         
         cap.release()
         
+        # Calculate time with different faces (in seconds)
+        time_with_different_faces = len(self.different_faces_timestamps) * self.FACE_RECOGNITION_INTERVAL
+        
         # Calculate suspicion score (0-100)
         score = min(100, (
-            (frames_with_extra_people / max(total_frames_analyzed, 1)) * 50 +  # Percentage of frames with extra people
-            (int(first_extra_person_time is not None) * 20)  # Bonus for detecting extra people
+            (frames_with_extra_people / max(total_frames_analyzed, 1)) * 30 +  # Percentage of frames with extra people
+            (int(first_extra_person_time is not None) * 20) +  # Bonus for detecting extra people
+            (self.different_faces_detected * 10) +  # Penalty for each different face detected
+            (int(time_with_different_faces > 0) * 20)  # Major penalty if different faces detected
         ))
         
         logger.info(f"Analysis complete. Total frames analyzed: {total_frames_analyzed}, "
-                   f"Frames with extra people: {frames_with_extra_people}")
+                   f"Frames with extra people: {frames_with_extra_people}, "
+                   f"Different faces detected: {self.different_faces_detected}")
         
         return {
             "total_frames_analyzed": total_frames_analyzed,
             "frames_with_extra_people": frames_with_extra_people,
             "first_extra_person_detected_at": self._format_timestamp(first_extra_person_time) if first_extra_person_time is not None else "None",
+            "different_faces_detected": self.different_faces_detected,
+            "different_face_timestamps": self.different_faces_timestamps,
+            "has_different_faces": self.different_faces_detected > 0,
+            "time_with_multiple_people": frames_with_extra_people * self.SAMPLE_INTERVAL,
             "score": round(score, 1)
         }
 

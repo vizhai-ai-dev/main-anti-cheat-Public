@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Bar, Doughnut } from 'react-chartjs-2';
+import { Bar, Doughnut, Line } from 'react-chartjs-2';
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -10,6 +10,8 @@ import {
   Tooltip,
   Legend,
   ArcElement,
+  PointElement,
+  LineElement,
 } from 'chart.js';
 import { getAnalysisStatus, AnalysisReport } from '../services/api';
 
@@ -21,7 +23,9 @@ ChartJS.register(
   Title,
   Tooltip,
   Legend,
-  ArcElement
+  ArcElement,
+  PointElement,
+  LineElement
 );
 
 const ReportPage: React.FC = () => {
@@ -92,32 +96,29 @@ const ReportPage: React.FC = () => {
   // Chart data
   const generateBarChartData = () => {
     if (!report) return null;
-
+    
     return {
-      labels: ['Screen Switch', 'Gaze', 'Audio', 'Multi-Person', 'Lip Sync'],
+      labels: ['Gaze Analysis', 'Audio Analysis', 'Multi-Person', 'Lip Sync'],
       datasets: [
         {
-          label: 'Score',
+          label: 'Module Scores',
           data: [
-            report.module_scores.screen_switch,
             report.module_scores.gaze,
             report.module_scores.audio,
             report.module_scores.multi_person,
-            report.module_scores.lip_sync,
+            report.module_scores.lip_sync
           ],
           backgroundColor: [
-            'rgba(14, 165, 233, 0.7)',
-            'rgba(20, 184, 166, 0.7)',
-            'rgba(59, 130, 246, 0.7)',
-            'rgba(168, 85, 247, 0.7)',
-            'rgba(236, 72, 153, 0.7)',
+            'rgba(54, 162, 235, 0.5)',
+            'rgba(255, 206, 86, 0.5)',
+            'rgba(75, 192, 192, 0.5)',
+            'rgba(153, 102, 255, 0.5)'
           ],
           borderColor: [
-            'rgba(14, 165, 233, 1)',
-            'rgba(20, 184, 166, 1)',
-            'rgba(59, 130, 246, 1)',
-            'rgba(168, 85, 247, 1)',
-            'rgba(236, 72, 153, 1)',
+            'rgba(54, 162, 235, 1)',
+            'rgba(255, 206, 86, 1)',
+            'rgba(75, 192, 192, 1)',
+            'rgba(153, 102, 255, 1)'
           ],
           borderWidth: 1,
         },
@@ -127,36 +128,105 @@ const ReportPage: React.FC = () => {
 
   const generateDoughnutChartData = () => {
     if (!report) return null;
-
+    
     return {
-      labels: ['Screen Switch', 'Gaze', 'Audio', 'Multi-Person', 'Lip Sync'],
+      labels: ['Gaze', 'Audio', 'Multi-Person', 'Lip Sync'],
       datasets: [
         {
           data: [
-            report.module_scores.screen_switch,
             report.module_scores.gaze,
             report.module_scores.audio,
             report.module_scores.multi_person,
-            report.module_scores.lip_sync,
+            report.module_scores.lip_sync
           ],
           backgroundColor: [
-            'rgba(14, 165, 233, 0.7)',
-            'rgba(20, 184, 166, 0.7)',
-            'rgba(59, 130, 246, 0.7)',
-            'rgba(168, 85, 247, 0.7)',
-            'rgba(236, 72, 153, 0.7)',
+            'rgba(54, 162, 235, 0.7)',
+            'rgba(255, 206, 86, 0.7)',
+            'rgba(75, 192, 192, 0.7)',
+            'rgba(153, 102, 255, 0.7)'
           ],
           borderColor: [
-            'rgba(14, 165, 233, 1)',
-            'rgba(20, 184, 166, 1)',
-            'rgba(59, 130, 246, 1)',
-            'rgba(168, 85, 247, 1)',
-            'rgba(236, 72, 153, 1)',
+            'rgba(54, 162, 235, 1)',
+            'rgba(255, 206, 86, 1)',
+            'rgba(75, 192, 192, 1)',
+            'rgba(153, 102, 255, 1)'
           ],
           borderWidth: 1,
         },
       ],
     };
+  };
+
+  // Add new chart generation functions
+  const generateLipSyncTimelineChart = () => {
+    if (!report?.lip_sync?.lip_sync_timeline) return null;
+    
+    return {
+      labels: report.lip_sync.lip_sync_timeline.map(item => item.timestamp),
+      datasets: [
+        {
+          label: 'Lip Sync Score',
+          data: report.lip_sync.lip_sync_timeline.map(item => item.score),
+          borderColor: 'rgba(236, 72, 153, 1)',
+          backgroundColor: 'rgba(236, 72, 153, 0.2)',
+          tension: 0.3,
+          fill: true,
+        }
+      ]
+    };
+  };
+  
+  const generatePeopleDetectionTimelineChart = () => {
+    if (!report?.multi_person?.people_detection_timeline) return null;
+    
+    return {
+      labels: report.multi_person.people_detection_timeline.map(item => item.timestamp),
+      datasets: [
+        {
+          label: 'People Detected',
+          data: report.multi_person.people_detection_timeline.map(item => item.count),
+          borderColor: 'rgba(168, 85, 247, 1)',
+          backgroundColor: 'rgba(168, 85, 247, 0.2)',
+          stepped: true,
+        }
+      ]
+    };
+  };
+  
+  const lineChartOptions = {
+    responsive: true,
+    plugins: {
+      legend: {
+        position: 'top' as const,
+      },
+      tooltip: {
+        callbacks: {
+          label: function(context: any) {
+            return `${context.dataset.label}: ${context.parsed.y}`;
+          }
+        }
+      }
+    },
+    scales: {
+      y: {
+        beginAtZero: true,
+      }
+    },
+  };
+  
+  const lipSyncChartOptions = {
+    ...lineChartOptions,
+    scales: {
+      y: {
+        beginAtZero: true,
+        max: 100,
+        ticks: {
+          callback: function(value: any) {
+            return value + '%';
+          }
+        }
+      }
+    },
   };
 
   const barChartOptions = {
@@ -185,7 +255,7 @@ const ReportPage: React.FC = () => {
       }
     },
   };
-
+  
   const doughnutChartOptions = {
     responsive: true,
     maintainAspectRatio: false,
@@ -247,8 +317,11 @@ const ReportPage: React.FC = () => {
     );
   }
 
+  // Generate chart data
   const barChartData = generateBarChartData();
   const doughnutChartData = generateDoughnutChartData();
+  const lipSyncTimelineChart = generateLipSyncTimelineChart();
+  const peopleDetectionTimelineChart = generatePeopleDetectionTimelineChart();
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
@@ -375,135 +448,237 @@ const ReportPage: React.FC = () => {
         </div>
       ) : (
         <div>
-          {/* Screen Switch Analysis */}
-          <div className="card mb-6">
-            <div className="flex items-center">
-              <div className="p-2 rounded-md bg-primary-100 mr-4">
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6 text-primary-600">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 17.25v1.007a3 3 0 01-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0115 18.257V17.25m6-12V15a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 15V5.25m18 0A2.25 2.25 0 0018.75 3H5.25A2.25 2.25 0 003 5.25m18 0V12a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 12V5.25" />
-                </svg>
+          {/* Module Scores Section */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+            {/* Gaze Analysis */}
+            <div className="card">
+              <div className="flex items-center">
+                <div className="p-2 rounded-md bg-primary-100 mr-4">
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6 text-primary-600">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                  </svg>
+                </div>
+                <div>
+                  <h3 className="text-lg font-medium text-dark-800">Gaze Tracking</h3>
+                  <p className="text-dark-500 text-sm">Score: {report.module_scores.gaze.toFixed(1)}%</p>
+                </div>
               </div>
-              <div>
-                <h3 className="text-lg font-medium text-dark-800">Screen Analysis</h3>
-                <p className="text-dark-500 text-sm">Score: {report.module_scores.screen_switch.toFixed(1)}%</p>
+              <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="bg-gray-50 p-4 rounded-md">
+                  <div className="text-sm font-medium text-dark-700 mb-1">Off-Screen Looks</div>
+                  <div className="text-2xl font-bold text-dark-800">{report.gaze?.off_screen_count || 0}</div>
+                </div>
+                <div className="bg-gray-50 p-4 rounded-md">
+                  <div className="text-sm font-medium text-dark-700 mb-1">Gaze Confidence</div>
+                  <div className="text-2xl font-bold text-dark-800">{(report.gaze?.average_confidence || 0) * 100}%</div>
+                </div>
               </div>
             </div>
-            <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="bg-gray-50 p-4 rounded-md">
-                <div className="text-sm font-medium text-dark-700 mb-1">Fullscreen Violations</div>
-                <div className="text-2xl font-bold text-dark-800">{report.screen_switch?.fullscreen_violations || 0}</div>
+
+            {/* Audio Analysis */}
+            <div className="card">
+              <div className="flex items-center">
+                <div className="p-2 rounded-md bg-primary-100 mr-4">
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6 text-primary-600">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
+                  </svg>
+                </div>
+                <div>
+                  <h3 className="text-lg font-medium text-dark-800">Audio Analysis</h3>
+                  <p className="text-dark-500 text-sm">Score: {report.module_scores.audio.toFixed(1)}%</p>
+                </div>
               </div>
-              <div className="bg-gray-50 p-4 rounded-md">
-                <div className="text-sm font-medium text-dark-700 mb-1">Screen Switches</div>
-                <div className="text-2xl font-bold text-dark-800">{report.screen_switch?.switch_count || 0}</div>
+              <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="bg-gray-50 p-4 rounded-md">
+                  <div className="text-sm font-medium text-dark-700 mb-1">Multiple Speakers</div>
+                  <div className="text-2xl font-bold text-dark-800">{report.audio?.multiple_speakers ? 'Yes' : 'No'}</div>
+                </div>
+                <div className="bg-gray-50 p-4 rounded-md">
+                  <div className="text-sm font-medium text-dark-700 mb-1">Keyboard Typing</div>
+                  <div className="text-2xl font-bold text-dark-800">{report.audio?.keyboard_typing_count || 0} instances</div>
+                </div>
+                <div className="bg-gray-50 p-4 rounded-md">
+                  <div className="text-sm font-medium text-dark-700 mb-1">Silence</div>
+                  <div className="text-2xl font-bold text-dark-800">{report.audio?.silence_percentage || 0}%</div>
+                </div>
               </div>
             </div>
           </div>
 
-          {/* Gaze Analysis */}
-          <div className="card mb-6">
-            <div className="flex items-center">
-              <div className="p-2 rounded-md bg-primary-100 mr-4">
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6 text-primary-600">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                </svg>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+            {/* Multi-Person Analysis */}
+            <div className="card">
+              <div className="flex items-center">
+                <div className="p-2 rounded-md bg-primary-100 mr-4">
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6 text-primary-600">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
+                  </svg>
+                </div>
+                <div>
+                  <h3 className="text-lg font-medium text-dark-800">Multi-Person Detection</h3>
+                  <p className="text-dark-500 text-sm">Score: {report.module_scores.multi_person.toFixed(1)}%</p>
+                </div>
               </div>
-              <div>
-                <h3 className="text-lg font-medium text-dark-800">Gaze Tracking</h3>
-                <p className="text-dark-500 text-sm">Score: {report.module_scores.gaze.toFixed(1)}%</p>
+              <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="bg-gray-50 p-4 rounded-md">
+                  <div className="text-sm font-medium text-dark-700 mb-1">Max People Detected</div>
+                  <div className="text-2xl font-bold text-dark-800">{report.multi_person?.max_people_detected || 0}</div>
+                </div>
+                <div className="bg-gray-50 p-4 rounded-md">
+                  <div className="text-sm font-medium text-dark-700 mb-1">Time with Multiple People</div>
+                  <div className="text-2xl font-bold text-dark-800">{report.multi_person?.time_with_multiple_people || 0}s</div>
+                </div>
               </div>
+              
+              {/* Add Face Recognition Information */}
+              {report.multi_person?.has_different_faces && (
+                <div className="mt-4">
+                  <div className="p-3 bg-red-50 rounded-md border border-red-200">
+                    <div className="flex items-center">
+                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5 text-red-600 mr-2">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+                      </svg>
+                      <div className="text-sm font-medium text-red-700">
+                        {report.multi_person.different_faces_detected} different {report.multi_person.different_faces_detected === 1 ? 'face' : 'faces'} detected
+                      </div>
+                    </div>
+                    
+                    {report.multi_person.different_face_timestamps.length > 0 && (
+                      <div className="mt-2 ml-7">
+                        <div className="text-xs text-red-600 font-medium mb-1">Timestamps:</div>
+                        <div className="flex flex-wrap gap-1">
+                          {report.multi_person.different_face_timestamps.map((timestamp, idx) => (
+                            <span key={idx} className="px-2 py-1 bg-red-100 text-red-800 text-xs rounded-full">
+                              {timestamp}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
-            <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="bg-gray-50 p-4 rounded-md">
-                <div className="text-sm font-medium text-dark-700 mb-1">Off-Screen Looks</div>
-                <div className="text-2xl font-bold text-dark-800">{report.gaze?.off_screen_count || 0}</div>
-              </div>
-              <div className="bg-gray-50 p-4 rounded-md">
-                <div className="text-sm font-medium text-dark-700 mb-1">Gaze Confidence</div>
-                <div className="text-2xl font-bold text-dark-800">{(report.gaze?.average_confidence || 0) * 100}%</div>
-              </div>
-            </div>
-          </div>
 
-          {/* Audio Analysis */}
-          <div className="card mb-6">
-            <div className="flex items-center">
-              <div className="p-2 rounded-md bg-primary-100 mr-4">
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6 text-primary-600">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
-                </svg>
+            {/* Lip Sync Analysis */}
+            <div className="card">
+              <div className="flex items-center">
+                <div className="p-2 rounded-md bg-primary-100 mr-4">
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6 text-primary-600">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
+                  </svg>
+                </div>
+                <div>
+                  <h3 className="text-lg font-medium text-dark-800">Lip Sync Analysis</h3>
+                  <p className="text-dark-500 text-sm">Score: {report.module_scores.lip_sync.toFixed(1)}%</p>
+                </div>
               </div>
-              <div>
-                <h3 className="text-lg font-medium text-dark-800">Audio Analysis</h3>
-                <p className="text-dark-500 text-sm">Score: {report.module_scores.audio.toFixed(1)}%</p>
-              </div>
-            </div>
-            <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="bg-gray-50 p-4 rounded-md">
-                <div className="text-sm font-medium text-dark-700 mb-1">Multiple Speakers</div>
-                <div className="text-2xl font-bold text-dark-800">{report.audio?.multiple_speakers ? 'Yes' : 'No'}</div>
-              </div>
-              <div className="bg-gray-50 p-4 rounded-md">
-                <div className="text-sm font-medium text-dark-700 mb-1">Keyboard Typing</div>
-                <div className="text-2xl font-bold text-dark-800">{report.audio?.keyboard_typing_count || 0} instances</div>
-              </div>
-              <div className="bg-gray-50 p-4 rounded-md">
-                <div className="text-sm font-medium text-dark-700 mb-1">Silence</div>
-                <div className="text-2xl font-bold text-dark-800">{report.audio?.silence_percentage || 0}%</div>
+              <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="bg-gray-50 p-4 rounded-md">
+                  <div className="text-sm font-medium text-dark-700 mb-1">Lip Sync Score</div>
+                  <div className="text-2xl font-bold text-dark-800">{report.lip_sync?.lip_sync_score || 0}%</div>
+                </div>
+                <div className="bg-gray-50 p-4 rounded-md">
+                  <div className="text-sm font-medium text-dark-700 mb-1">Major Desync Detected</div>
+                  <div className="text-2xl font-bold text-dark-800">{report.lip_sync?.major_lip_desync_detected ? 'Yes' : 'No'}</div>
+                </div>
               </div>
             </div>
           </div>
-
-          {/* Multi-Person Analysis */}
-          <div className="card mb-6">
-            <div className="flex items-center">
-              <div className="p-2 rounded-md bg-primary-100 mr-4">
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6 text-primary-600">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
-                </svg>
-              </div>
-              <div>
-                <h3 className="text-lg font-medium text-dark-800">Multi-Person Detection</h3>
-                <p className="text-dark-500 text-sm">Score: {report.module_scores.multi_person.toFixed(1)}%</p>
-              </div>
-            </div>
-            <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="bg-gray-50 p-4 rounded-md">
-                <div className="text-sm font-medium text-dark-700 mb-1">Max People Detected</div>
-                <div className="text-2xl font-bold text-dark-800">{report.multi_person?.max_people_detected || 0}</div>
-              </div>
-              <div className="bg-gray-50 p-4 rounded-md">
-                <div className="text-sm font-medium text-dark-700 mb-1">Time with Multiple People</div>
-                <div className="text-2xl font-bold text-dark-800">{report.multi_person?.time_with_multiple_people || 0}s</div>
-              </div>
-            </div>
-          </div>
-
-          {/* Lip Sync Analysis */}
-          <div className="card mb-6">
-            <div className="flex items-center">
-              <div className="p-2 rounded-md bg-primary-100 mr-4">
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6 text-primary-600">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
-                </svg>
-              </div>
-              <div>
-                <h3 className="text-lg font-medium text-dark-800">Lip Sync Analysis</h3>
-                <p className="text-dark-500 text-sm">Score: {report.module_scores.lip_sync.toFixed(1)}%</p>
+          
+          {/* Additional Timeline Visualizations */}
+          {/* Gaze Direction Timeline */}
+          {report.gaze?.gaze_direction_timeline && (
+            <div className="card mb-6">
+              <h3 className="text-lg font-medium text-dark-800 mb-4">Gaze Direction Timeline</h3>
+              <div className="overflow-x-auto">
+                <div className="min-w-full">
+                  <table className="min-w-full divide-y divide-gray-200">
+                    <thead>
+                      <tr>
+                        <th className="px-6 py-3 bg-gray-50 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Timestamp</th>
+                        <th className="px-6 py-3 bg-gray-50 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Direction</th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {report.gaze.gaze_direction_timeline.map((item, idx) => (
+                        <tr key={idx} className={idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{item.timestamp}</td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <span className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${
+                              item.direction === 'center' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'
+                            }`}>
+                              {item.direction}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
-            <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="bg-gray-50 p-4 rounded-md">
-                <div className="text-sm font-medium text-dark-700 mb-1">Lip Sync Score</div>
-                <div className="text-2xl font-bold text-dark-800">{report.lip_sync?.lip_sync_score || 0}%</div>
-              </div>
-              <div className="bg-gray-50 p-4 rounded-md">
-                <div className="text-sm font-medium text-dark-700 mb-1">Major Desync Detected</div>
-                <div className="text-2xl font-bold text-dark-800">{report.lip_sync?.major_lip_desync_detected ? 'Yes' : 'No'}</div>
+          )}
+          
+          {/* People Detection Timeline Chart */}
+          {report.multi_person?.people_detection_timeline && (
+            <div className="card mb-6">
+              <h3 className="text-lg font-medium text-dark-800 mb-4">People Detection Timeline</h3>
+              <div className="h-60">
+                {peopleDetectionTimelineChart && (
+                  <Line data={peopleDetectionTimelineChart} options={lineChartOptions} />
+                )}
               </div>
             </div>
-          </div>
+          )}
+          
+          {/* Speaking Timeline */}
+          {report.audio?.speaking_timeline && (
+            <div className="card mb-6">
+              <h3 className="text-lg font-medium text-dark-800 mb-4">Speaking Timeline</h3>
+              <div className="overflow-x-auto">
+                <div className="min-w-full">
+                  <table className="min-w-full divide-y divide-gray-200">
+                    <thead>
+                      <tr>
+                        <th className="px-6 py-3 bg-gray-50 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Start</th>
+                        <th className="px-6 py-3 bg-gray-50 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">End</th>
+                        <th className="px-6 py-3 bg-gray-50 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Speaker</th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {report.audio.speaking_timeline.map((item, idx) => (
+                        <tr key={idx} className={idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{item.start}</td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{item.end}</td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <span className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${
+                              item.speaker === 'primary' ? 'bg-blue-100 text-blue-800' : 'bg-red-100 text-red-800'
+                            }`}>
+                              {item.speaker}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+          
+          {/* Lip Sync Timeline Chart */}
+          {report.lip_sync?.lip_sync_timeline && (
+            <div className="card mb-6">
+              <h3 className="text-lg font-medium text-dark-800 mb-4">Lip Sync Timeline</h3>
+              <div className="h-60">
+                {lipSyncTimelineChart && (
+                  <Line data={lipSyncTimelineChart} options={lipSyncChartOptions} />
+                )}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
