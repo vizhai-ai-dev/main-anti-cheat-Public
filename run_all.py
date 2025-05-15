@@ -10,6 +10,13 @@ import importlib.util
 import sys
 import traceback
 
+# Import actual analysis modules
+from gaze_tracking import GazeTracker
+from lip_sync_detector import LipSyncDetector
+from multi_person import MultiPersonDetector
+from audio_analysis import AudioAnalyzer
+from cheat_score import CheatScoreCalculator
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -27,35 +34,45 @@ class DirectModuleRunner:
     This is a simplified version for demo purposes.
     """
     
+    def __init__(self):
+        self.gaze_tracker = GazeTracker()
+        self.lip_sync_detector = LipSyncDetector()
+        self.multi_person_detector = MultiPersonDetector()
+        self.audio_analyzer = AudioAnalyzer()
+        self.cheat_score_calculator = CheatScoreCalculator()
+    
     async def run_all_modules(self, video_path):
         """
-        Mock function to run all analysis modules
+        Run all analysis modules on the video
         """
-        return {
-            "gaze": {
-                "score": 85.0
-            },
-            "audio": {
-                "score": 90.0
-            },
-            "multi_person": {
-                "score": 95.0
-            },
-            "lip_sync": {
-                "score": 75.0
+        try:
+            # Run all modules in parallel
+            gaze_results = await self.gaze_tracker.analyze(video_path)
+            lip_sync_results = await self.lip_sync_detector.analyze(video_path)
+            multi_person_results = await self.multi_person_detector.analyze(video_path)
+            audio_results = await self.audio_analyzer.analyze(video_path)
+            
+            return {
+                "gaze": gaze_results,
+                "lip_sync": lip_sync_results,
+                "multi_person": multi_person_results,
+                "audio": audio_results
             }
-        }
+        except Exception as e:
+            logger.error(f"Error running analysis modules: {str(e)}")
+            logger.error(traceback.format_exc())
+            raise
     
     async def compute_cheat_score(self, module_results):
         """
-        Mock function to compute cheat score
+        Compute the final cheat score based on all module results
         """
-        # Just return a mock score
-        return {
-            "final_score": 85.0,
-            "risk": "Low",
-            "reasons": ["Mock reason 1", "Mock reason 2"]
-        }
+        try:
+            return await self.cheat_score_calculator.compute_score(module_results)
+        except Exception as e:
+            logger.error(f"Error computing cheat score: {str(e)}")
+            logger.error(traceback.format_exc())
+            raise
 
 # FastAPI implementation
 app = FastAPI()

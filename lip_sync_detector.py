@@ -223,99 +223,54 @@ class LipSyncDetector:
         return mismatches
 
     def detect_lip_sync_issues(self, video_path: str) -> Dict:
-        """Main function to detect lip-sync issues in a video."""
+        """Main function to detect lip sync issues in a video."""
         try:
-            # Extract frames
+            # Extract frames from video
             frames = self._extract_frames(video_path)
-            logger.info(f"Extracted {len(frames)} frames for analysis")
             
-            # Extract audio and get voice activity
-            try:
-                audio_path = self.audio_analyzer._extract_audio(video_path)
-                logger.info(f"Audio extracted to: {audio_path}")
-                
-                # Check if the audio file exists and has content
-                if not os.path.exists(audio_path):
-                    logger.error(f"Audio file not found: {audio_path}")
-                    has_voice = False
-                    voice_segments = []
-                else:
-                    # Get voice activity
-                    voice_segments = self.audio_analyzer._detect_voice_activity(audio_path)
-                    has_voice = len(voice_segments) > 0
-                    
-                    # Log voice activity results
-                    if has_voice:
-                        logger.info(f"Voice activity detected: {len(voice_segments)} segments")
-                        for i, seg in enumerate(voice_segments[:3]):  # Log first 3 segments
-                            logger.info(f"Voice segment {i+1}: {seg['start']:.2f}s - {seg['end']:.2f}s")
-                    else:
-                        logger.warning("No voice activity detected in the video")
-            except Exception as audio_error:
-                logger.error(f"Error processing audio: {str(audio_error)}")
-                has_voice = False
-                voice_segments = []
-                import traceback
-                logger.error(traceback.format_exc())
-            
-            # Analyze lip movement using LipNet
+            # Detect speaking using LipNet
             speaking_segments = self._detect_speaking(frames)
-            logger.info(f"Detected {sum(1 for s in speaking_segments if s['is_speaking'])} speaking frames out of {len(speaking_segments)} analyzed")
             
-            # If no voice activity, we can't detect mismatches
-            if not has_voice:
-                mismatches = []
-                speech_frames = 0
-                mismatch_frames = 0
-                worst_mismatch_duration = 0.0
-                sync_score = 100.0  # Perfect score since there's no audio to sync with
-            else:
-                # Detect mismatches
-                mismatches = self._detect_mismatches(speaking_segments, voice_segments)
-                logger.info(f"Detected {len(mismatches)} mismatch segments")
-                
-                # Calculate metrics
-                speech_frames = sum(1 for s in speaking_segments if s["is_speaking"])
-                mismatch_frames = sum(1 for s in speaking_segments if any(
-                    s["timestamp"] >= mismatch["start"] and s["timestamp"] <= mismatch["end"]
-                    for mismatch in mismatches
-                ))
-                
-                # Calculate worst mismatch duration and severity
-                worst_mismatch = max(
-                    mismatches,
-                    key=lambda x: (x["end"] - x["start"]) * x["severity"],
-                    default={"end": 0, "start": 0, "severity": 0}
-                )
-                worst_mismatch_duration = worst_mismatch["end"] - worst_mismatch["start"]
-                
-                # Calculate lip-sync score (0-100)
-                frames_tracked = len(frames)
-                sync_score = 100 * (1 - (mismatch_frames / max(frames_tracked, 1)))
+            # Get voice activity from audio
+            voice_segments = self.audio_analyzer._detect_voice_activity(video_path)
             
-            # Try to clean up temporary audio file
-            try:
-                if os.path.exists(audio_path):
-                    os.remove(audio_path)
-            except Exception as e:
-                logger.warning(f"Failed to clean up audio file: {str(e)}")
+            # Detect mismatches
+            mismatches = self._detect_mismatches(speaking_segments, voice_segments)
+            
+            # Calculate lip sync score
+            total_frames = len(speaking_segments)
+            mismatch_frames = sum(1 for m in mismatches if m["severity"] > self.MISMATCH_THRESHOLD)
+            lip_sync_score = 100 * (1 - (mismatch_frames / max(total_frames, 1)))
             
             return {
-                "frames_tracked": len(frames),
-                "speech_frames": speech_frames,
-                "speaking_frames": sum(1 for s in speaking_segments if s["is_speaking"]),
-                "mismatch_frames": mismatch_frames,
-                "worst_mismatch_duration": round(worst_mismatch_duration, 1),
-                "lip_sync_score": round(sync_score, 1),
-                "major_lip_desync_detected": worst_mismatch_duration > self.MISMATCH_THRESHOLD,
-                "mismatch_segments": mismatches,
-                "has_audio": has_voice
+                "lip_sync_score": round(lip_sync_score, 1),
+                "major_lip_desync_detected": any(m["severity"] > self.MISMATCH_THRESHOLD for m in mismatches),
+                "mismatches": mismatches,
+                "speaking_segments": speaking_segments,
+                "voice_segments": voice_segments
             }
-            
         except Exception as e:
-            logger.error(f"Error analyzing lip sync: {str(e)}")
-            import traceback
-            logger.error(traceback.format_exc())
+            logger.error(f"Error in lip sync detection: {str(e)}")
+            raise
+
+    async def analyze(self, video_path: str) -> Dict:
+        """
+        Analyze a video for lip sync issues.
+        This is an async wrapper around detect_lip_sync_issues.
+        """
+        try:
+            result = self.detect_lip_sync_issues(video_path)
+            return {
+                "score": result["lip_sync_score"],
+                "lip_sync_score": result["lip_sync_score"],
+                "major_lip_desync_detected": result["major_lip_desync_detected"],
+                "lip_sync_timeline": [
+                    {"timestamp": f"00:00:{int(seg['timestamp']):02d}", "score": seg["speaking_probability"] * 100}
+                    for seg in result["speaking_segments"]
+                ]
+            }
+        except Exception as e:
+            logger.error(f"Error in lip sync analysis: {str(e)}")
             raise
 
     def __del__(self):

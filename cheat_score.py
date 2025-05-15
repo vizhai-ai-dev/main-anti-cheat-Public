@@ -133,44 +133,34 @@ class CheatScoreCalculator:
         # Calculate multi-person score
         if "multi_person" in results:
             multi_data = results["multi_person"]
-            people_score = 100 if multi_data.get("max_people_detected", 0) <= 1 else 0
-            time_score = 100 - min(100, multi_data.get("time_with_multiple_people", 0) * 5)
-            
-            # Apply severe penalty for different faces detected
-            face_switching_penalty = 0
-            if multi_data.get("has_different_faces", False):
-                face_switching_penalty = min(100, multi_data.get("different_faces_detected", 0) * 30)
-            
-            # Combine scores with heavier weight on face switching
-            scores["multi_person"] = max(0, (people_score * 0.3 + time_score * 0.2 - face_switching_penalty))
+            people_score = 100 - min(100, multi_data.get("max_people_detected", 1) * 25)
+            time_score = 100 - min(100, multi_data.get("time_with_multiple_people", 0) * 2)
+            face_score = 0 if multi_data.get("has_different_faces", False) else 100
+            scores["multi_person"] = (people_score * 0.4 + time_score * 0.3 + face_score * 0.3)
         else:
             scores["multi_person"] = 100
         
         # Calculate lip sync score
         if "lip_sync" in results:
             lip_sync_data = results["lip_sync"]
-            lip_sync_score = lip_sync_data.get("lip_sync_score", 100)
-            desync_penalty = 30 if lip_sync_data.get("major_lip_desync_detected", False) else 0
-            scores["lip_sync"] = max(0, lip_sync_score - desync_penalty)
+            scores["lip_sync"] = lip_sync_data.get("lip_sync_score", 100)
         else:
             scores["lip_sync"] = 100
         
-        # Calculate weighted average
-        final_score = 0
-        total_weight = 0
+        # Calculate final score
+        final_score = (
+            scores["gaze"] * 0.3 +
+            scores["audio"] * 0.3 +
+            scores["multi_person"] * 0.2 +
+            scores["lip_sync"] * 0.2
+        )
         
-        for key, score in scores.items():
-            weight = self.WEIGHTS.get(key, 0)
-            final_score += score * weight
-            total_weight += weight
-        
-        if total_weight > 0:
-            final_score /= total_weight
-        
-        # Inverse the score - higher means more likely to be cheating
-        cheat_score = 100 - final_score
-        
-        return cheat_score
+        return {
+            "final_score": round(final_score, 1),
+            "risk": self._get_risk_level(final_score),
+            "reasons": self._generate_reasons(results),
+            "module_scores": scores
+        }
     
     def _xgboost_scoring(self, results):
         """Calculate cheating score using XGBoost model"""
@@ -245,6 +235,17 @@ class CheatScoreCalculator:
             logger.error(f"Error computing cheat score: {str(e)}")
             import traceback
             logger.error(traceback.format_exc())
+            raise
+
+    async def compute_score(self, results: Dict) -> Dict:
+        """
+        Compute the final cheat score from all module results.
+        This is an async wrapper around _rule_based_scoring.
+        """
+        try:
+            return self._rule_based_scoring(results)
+        except Exception as e:
+            logger.error(f"Error computing cheat score: {str(e)}")
             raise
 
 # FastAPI implementation

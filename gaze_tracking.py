@@ -163,6 +163,24 @@ class GazeTracker:
             "score": round(score, 1)
         }
 
+    async def analyze(self, video_path: str) -> Dict:
+        """
+        Analyze a video for gaze tracking.
+        This is an async wrapper around detect_gaze_deviation.
+        """
+        try:
+            result = self.detect_gaze_deviation(video_path)
+            return {
+                "score": result["score"],
+                "off_screen_count": result["frames_looked_away"],
+                "average_confidence": 0.95,  # Mock value
+                "off_screen_time_percentage": (result["frames_looked_away"] / max(result["frames_tracked"], 1)) * 100,
+                "gaze_direction_timeline": []  # Mock timeline
+            }
+        except Exception as e:
+            logger.error(f"Error in gaze analysis: {str(e)}")
+            raise
+
 # FastAPI implementation
 app = FastAPI()
 

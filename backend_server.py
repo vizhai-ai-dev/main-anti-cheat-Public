@@ -33,7 +33,14 @@ app.add_middleware(
 
 # Create a temporary directory for uploaded videos
 UPLOAD_DIR = "uploaded_videos"
-os.makedirs(UPLOAD_DIR, exist_ok=True)
+try:
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
+    # Ensure the directory has proper permissions
+    os.chmod(UPLOAD_DIR, 0o755)
+    logger.info(f"Upload directory created/verified at {os.path.abspath(UPLOAD_DIR)}")
+except Exception as e:
+    logger.error(f"Failed to create upload directory: {str(e)}")
+    raise RuntimeError(f"Failed to create upload directory: {str(e)}")
 
 # Dictionary to store analysis results
 analysis_results = {}
@@ -60,16 +67,48 @@ async def health_check():
 @app.post("/upload")
 async def upload_video(video: UploadFile = File(...)):
     try:
+        # Validate file
+        if not video.filename:
+            raise HTTPException(status_code=400, detail="No file provided")
+        
+        # Validate file extension
+        allowed_extensions = {'.mp4', '.avi', '.mov', '.mkv'}
+        file_extension = os.path.splitext(video.filename)[1].lower()
+        if file_extension not in allowed_extensions:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid file type. Allowed types: {', '.join(allowed_extensions)}"
+            )
+        
         # Create a unique ID for this analysis
         analysis_id = str(uuid.uuid4())
-        file_extension = os.path.splitext(video.filename)[1]
+        logger.info(f"Starting upload for analysis ID: {analysis_id}")
         
         # Create a path for the uploaded file
         file_path = os.path.join(UPLOAD_DIR, f"{analysis_id}{file_extension}")
+        logger.info(f"File will be saved to: {file_path}")
         
-        # Save the uploaded file
-        with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(video.file, buffer)
+        try:
+            # Save the uploaded file
+            with open(file_path, "wb") as buffer:
+                shutil.copyfileobj(video.file, buffer)
+            
+            # Verify file was created and has content
+            if not os.path.exists(file_path):
+                raise RuntimeError("File was not created successfully")
+            
+            file_size = os.path.getsize(file_path)
+            if file_size == 0:
+                raise RuntimeError("Uploaded file is empty")
+            
+            logger.info(f"File uploaded successfully. Size: {file_size} bytes")
+            
+        except Exception as e:
+            logger.error(f"Error saving file: {str(e)}")
+            # Clean up if file was partially created
+            if os.path.exists(file_path):
+                os.remove(file_path)
+            raise HTTPException(status_code=500, detail=f"Error saving file: {str(e)}")
         
         # Store initial analysis status
         analysis_results[analysis_id] = {
@@ -82,11 +121,14 @@ async def upload_video(video: UploadFile = File(...)):
         # Start analysis in the background
         asyncio.create_task(process_video(analysis_id, file_path))
         
-        return {"id": analysis_id}
+        return {"id": analysis_id, "status": "processing"}
     
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error uploading video: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Error uploading video: {str(e)}")
 
 async def process_video(analysis_id: str, file_path: str):
     try:
@@ -414,4 +456,4 @@ async def create_demo_analysis():
 if __name__ == "__main__":
     import uvicorn
     logger.info("Starting VIZH.AI Backend Server...")
-    uvicorn.run(app, host="0.0.0.0", port=8000) 
+    uvicorn.run(app, host="0.0.0.0", port=8001) 

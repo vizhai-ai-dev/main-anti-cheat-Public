@@ -98,6 +98,7 @@ class MultiPersonDetector:
         current_time = 0
         frame_count = 0
         last_different_face_time = None
+        people_detection_timeline = []
         
         while cap.isOpened():
             ret, frame = cap.read()
@@ -143,6 +144,12 @@ class MultiPersonDetector:
                         first_extra_person_time = current_time
                         logger.info(f"First extra person detected at {self._format_timestamp(first_extra_person_time)}")
                 
+                # Add to timeline
+                people_detection_timeline.append({
+                    "timestamp": self._format_timestamp(current_time),
+                    "count": valid_persons
+                })
+                
                 total_frames_analyzed += 1
                 logger.info(f"Processed frame {frame_count}/{total_frames}, Valid persons: {valid_persons}")
             
@@ -173,8 +180,29 @@ class MultiPersonDetector:
             "different_face_timestamps": self.different_faces_timestamps,
             "has_different_faces": self.different_faces_detected > 0,
             "time_with_multiple_people": frames_with_extra_people * self.SAMPLE_INTERVAL,
-            "score": round(score, 1)
+            "score": round(score, 1),
+            "people_detection_timeline": people_detection_timeline
         }
+
+    async def analyze(self, video_path: str) -> Dict:
+        """
+        Analyze a video for multiple persons.
+        This is an async wrapper around detect_multiple_persons.
+        """
+        try:
+            result = self.detect_multiple_persons(video_path)
+            return {
+                "score": result["score"],
+                "max_people_detected": max(seg["count"] for seg in result["people_detection_timeline"]),
+                "time_with_multiple_people": result["time_with_multiple_people"],
+                "people_detection_timeline": result["people_detection_timeline"],
+                "different_faces_detected": result["different_faces_detected"],
+                "different_face_timestamps": result["different_face_timestamps"],
+                "has_different_faces": result["has_different_faces"]
+            }
+        except Exception as e:
+            logger.error(f"Error in multi-person analysis: {str(e)}")
+            raise
 
 # FastAPI implementation
 app = FastAPI()
