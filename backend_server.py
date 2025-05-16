@@ -11,6 +11,9 @@ import asyncio
 import logging
 from random import choice
 import traceback
+import cv2
+import numpy as np
+from calibration_api import CalibrationAPI
 
 # Import our analysis modules
 from run_all import DirectModuleRunner
@@ -48,6 +51,9 @@ analysis_results = {}
 # Create a DirectModuleRunner instance
 runner = DirectModuleRunner()
 
+# Create a calibration instance
+calibration_api = CalibrationAPI()
+
 class AnalysisResponse(BaseModel):
     id: str
     status: str
@@ -55,6 +61,12 @@ class AnalysisResponse(BaseModel):
     completed_at: Optional[str] = None
     result: Optional[Dict] = None
     error: Optional[str] = None
+
+class CalibrationResponse(BaseModel):
+    status: str
+    progress: float
+    frames_processed: int
+    data: Optional[Dict] = None
 
 @app.get("/")
 async def root():
@@ -452,6 +464,64 @@ async def create_demo_analysis():
         logger.error(f"Error creating demo analysis: {str(e)}")
         logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Error creating demo analysis: {str(e)}")
+
+@app.post("/calibrate")
+async def calibrate_face(video: UploadFile = File(...)):
+    try:
+        # Validate file
+        if not video.filename:
+            raise HTTPException(status_code=400, detail="No file provided")
+        
+        # Create a unique ID for this calibration
+        calibration_id = str(uuid.uuid4())
+        
+        # Create a path for the uploaded file
+        file_path = os.path.join(UPLOAD_DIR, f"calibration_{calibration_id}.mp4")
+        
+        # Save the uploaded file
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(video.file, buffer)
+        
+        # Open the video file
+        cap = cv2.VideoCapture(file_path)
+        if not cap.isOpened():
+            raise HTTPException(status_code=400, detail="Could not open video file")
+        
+        # Process frames
+        frame_count = 0
+        while frame_count < 250 and cap.isOpened():
+            ret, frame = cap.read()
+            if not ret:
+                break
+                
+            # Process frame
+            processed_frame, status = calibration_api.process_frame(frame)
+            frame_count = status["frames_processed"]
+            
+            # If calibration is complete, break
+            if status["status"] == "complete":
+                break
+        
+        # Release video capture
+        cap.release()
+        
+        # Get calibration results
+        results = calibration_api.get_calibration_results()
+        
+        # Clean up the video file
+        os.remove(file_path)
+        
+        return CalibrationResponse(
+            status=results["status"],
+            progress=100 if results["status"] == "complete" else 0,
+            frames_processed=frame_count,
+            data=results if results["status"] == "complete" else None
+        )
+        
+    except Exception as e:
+        logger.error(f"Error during calibration: {str(e)}")
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Error during calibration: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn
