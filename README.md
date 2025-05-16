@@ -182,7 +182,13 @@ The backend provides structured JSON responses to the frontend. Here's the forma
 }
 ```
 
-## License
+| Task                      | Recommended Model                 |
+| ------------------------- | --------------------------------- |
+| Lip Movement Sync         | Wav2Lip-HD or SyncNet v2          |
+| Speaker Isolation         | speechbrain/spkrec-ecapa-voxceleb |
+| Lip-Audio Consistency     | AV-HuBERT or SyncNet              |
+| Gaze Tracking             | Gaze360 or RT-GENE                |
+| Face Landmarks (baseline) | MediaPipe FaceMesh or OpenFace2   |
+| Head Pose Estimation      | deep-head-pose (NVIDIA)           |
 
-This project is licensed under the MIT License. 
  
