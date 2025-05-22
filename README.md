@@ -6,11 +6,18 @@ VIZH.AI is a sophisticated application designed to analyze video integrity, part
 
 - **Multi-factor Analysis**: Examines numerous aspects of a video to determine integrity:
   - Screen switching detection
-  - Gaze tracking analysis
+  - Advanced gaze tracking analysis with directional sensitivity
   - Audio analysis (multiple speakers, keyboard typing, etc.)
   - Multi-person detection
   - Lip sync analysis
   - Facial recognition for identity verification
+
+- **Smart Gaze Analysis**: Sophisticated gaze tracking that understands context:
+  - Direction-aware monitoring (left/right vs up/down)
+  - Reduced penalties for natural coding/typing behaviors
+  - Separate thresholds for horizontal and vertical gaze movements
+  - Penalty-based scoring system for different gaze directions
+  - Confidence-weighted detection
 
 - **Identity Verification**: Analyzes the first detected face in a video and flags any different faces that appear:
   - Tracks the primary participant throughout the video
@@ -19,9 +26,11 @@ VIZH.AI is a sophisticated application designed to analyze video integrity, part
 
 - **Comprehensive Reports**: Generates detailed reports with:
   - Overall integrity score
-  - Risk assessment (Low, Medium, High, Very High)
+  - Risk assessment (Very Low, Low, Medium, High, Very High)
   - Detailed findings with visual charts
   - Module-specific scores and metrics
+  - Direction-specific gaze analysis
+  - Confidence scores for each detection
 
 - **Modern UI**: Clean, minimal, and user-friendly interface built with React and Tailwind CSS
 
@@ -125,7 +134,7 @@ The backend provides structured JSON responses to the frontend. Here's the forma
 ```json
 {
   "final_score": 92.3,
-  "risk": "Low|Medium|High|Very High",
+  "risk": "Very Low|Low|Medium|High|Very High",
   "reasons": [
     "Reason 1 for the score",
     "Reason 2 for the score"
@@ -134,9 +143,19 @@ The backend provides structured JSON responses to the frontend. Here's the forma
     "off_screen_count": 2,
     "average_confidence": 0.95,
     "off_screen_time_percentage": 3.2,
+    "average_penalty_factor": 0.85,
     "gaze_direction_timeline": [
-      {"timestamp": "00:00:15", "direction": "center"},
-      {"timestamp": "00:00:45", "direction": "right"}
+      {
+        "timestamp": "00:00:15",
+        "direction": "center",
+        "confidence": 0.95
+      },
+      {
+        "timestamp": "00:00:45",
+        "direction": "down",
+        "confidence": 0.92,
+        "penalty_factor": 0.3
+      }
     ],
     "score": 96.8
   },
@@ -182,13 +201,42 @@ The backend provides structured JSON responses to the frontend. Here's the forma
 }
 ```
 
-| Task                      | Recommended Model                 |
-| ------------------------- | --------------------------------- |
-| Lip Movement Sync         | Wav2Lip-HD or SyncNet v2          |
-| Speaker Isolation         | speechbrain/spkrec-ecapa-voxceleb |
-| Lip-Audio Consistency     | AV-HuBERT or SyncNet              |
-| Gaze Tracking             | Gaze360 or RT-GENE                |
-| Face Landmarks (baseline) | MediaPipe FaceMesh or OpenFace2   |
-| Head Pose Estimation      | deep-head-pose (NVIDIA)           |
+| Task                      | Recommended Model                 | Notes                                    |
+| ------------------------- | --------------------------------- | ---------------------------------------- |
+| Lip Movement Sync         | Wav2Lip-HD or SyncNet v2          | High accuracy lip-sync detection         |
+| Speaker Isolation         | speechbrain/spkrec-ecapa-voxceleb | Multiple speaker detection               |
+| Lip-Audio Consistency     | AV-HuBERT or SyncNet              | Audio-visual synchronization            |
+| Gaze Tracking             | Gaze360 or RT-GENE                | Direction-aware with context sensitivity |
+| Face Landmarks (baseline) | MediaPipe FaceMesh or OpenFace2   | High-precision facial tracking          |
+| Head Pose Estimation      | deep-head-pose (NVIDIA)           | Accurate pose estimation                |
+
+## Gaze Tracking Details
+
+The gaze tracking system uses a sophisticated approach to detect potential cheating while accounting for natural behaviors:
+
+### Direction-Specific Monitoring
+- **Horizontal Gaze (Left/Right)**
+  - Strict monitoring with 100% penalty
+  - Threshold: 0.15 (sensitive detection)
+  - Most suspicious direction
+
+- **Vertical Gaze (Up/Down)**
+  - Looking Up: 70% penalty
+  - Looking Down: 30% penalty (typing/coding)
+  - Threshold: 0.25 (more lenient)
+  - Natural behavior consideration
+
+### Scoring System
+- Confidence-weighted detection
+- Direction-specific penalties
+- Context-aware scoring
+- Natural behavior accommodation
+
+### Risk Assessment
+- Very Low: < 10
+- Low: 10-25
+- Medium: 25-45
+- High: 45-65
+- Very High: > 65
 
  

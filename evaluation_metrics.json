@@ -1,0 +1,78 @@
+{
+    "timestamp": "2025-05-22T19:05:10.545975",
+    "overall_metrics": {
+        "final_score": 65.3,
+        "risk_level": "High",
+        "total_reasons": 2,
+        "critical_reasons": 2,
+        "warning_reasons": 0,
+        "average_module_score": 71.37347778078806
+    },
+    "module_metrics": {
+        "gaze": {
+            "score": 5.3,
+            "confidence": 0.867,
+            "anomalies_detected": 123,
+            "performance_indicators": {
+                "off_screen_percentage": 3.360655737704918,
+                "tracking_confidence": 0.867
+            }
+        },
+        "lip_sync": {
+            "score": 99.9,
+            "confidence": 0.96,
+            "anomalies_detected": 1,
+            "performance_indicators": {
+                "sync_score": 99.9,
+                "desync_severity": "high"
+            }
+        },
+        "multi_person": {
+            "score": 0.0,
+            "confidence": 1.0,
+            "anomalies_detected": 0,
+            "performance_indicators": {
+                "multiple_people_time": 0.0,
+                "different_faces": 0
+            }
+        },
+        "audio": {
+            "score": 18.5,
+            "confidence": 0,
+            "anomalies_detected": 0,
+            "performance_indicators": {
+                "speaker_count": 1,
+                "typing_activity": 0,
+                "silence_percentage": 0,
+                "noise_level": "Low"
+            }
+        }
+    },
+    "risk_assessment": {
+        "risk_level": "High",
+        "risk_score": 3,
+        "risk_factors": [
+            {
+                "factor": "Looked away from screen 123 times",
+                "severity": "critical",
+                "module": "gaze"
+            },
+            {
+                "factor": "Major lip-sync desynchronization detected",
+                "severity": "critical",
+                "module": "lip_sync"
+            }
+        ],
+        "risk_distribution": {
+            "critical": 2,
+            "warning": 0
+        }
+    },
+    "performance_metrics": {
+        "modules_analyzed": 4,
+        "successful_modules": 4,
+        "failed_modules": 0,
+        "module_success_rate": 100.0,
+        "average_confidence": 0.70675
+    }
+}

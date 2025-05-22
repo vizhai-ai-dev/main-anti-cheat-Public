@@ -260,6 +260,19 @@ class LipSyncDetector:
         """
         try:
             result = self.detect_lip_sync_issues(video_path)
+            
+            # Calculate confidence based on multiple factors
+            lip_detection_confidence = 0.95  # Base confidence from face mesh
+            sync_quality_confidence = result["lip_sync_score"] / 100  # Higher sync score = higher confidence
+            mismatch_confidence = 1.0 - (len(result["mismatches"]) * 0.1)  # Fewer mismatches = higher confidence
+            
+            # Weighted average of confidence factors
+            average_confidence = (
+                lip_detection_confidence * 0.4 +  # Lip detection reliability
+                sync_quality_confidence * 0.4 +  # Sync quality
+                mismatch_confidence * 0.2  # Mismatch frequency
+            )
+            
             return {
                 "score": result["lip_sync_score"],
                 "lip_sync_score": result["lip_sync_score"],
@@ -267,7 +280,13 @@ class LipSyncDetector:
                 "lip_sync_timeline": [
                     {"timestamp": f"00:00:{int(seg['timestamp']):02d}", "score": seg["speaking_probability"] * 100}
                     for seg in result["speaking_segments"]
-                ]
+                ],
+                "average_confidence": round(average_confidence, 3),
+                "confidence_metrics": {
+                    "lip_detection_confidence": round(lip_detection_confidence, 3),
+                    "sync_quality_confidence": round(sync_quality_confidence, 3),
+                    "mismatch_confidence": round(mismatch_confidence, 3)
+                }
             }
         except Exception as e:
             logger.error(f"Error in lip sync analysis: {str(e)}")

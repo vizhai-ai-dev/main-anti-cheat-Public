@@ -191,6 +191,19 @@ class MultiPersonDetector:
         """
         try:
             result = self.detect_multiple_persons(video_path)
+            
+            # Calculate confidence based on multiple factors
+            detection_confidence = min(1.0, result["total_frames_analyzed"] / 100)  # More frames analyzed = higher confidence
+            face_recognition_confidence = 1.0 - (len(result["different_face_timestamps"]) * 0.1)  # Fewer face changes = higher confidence
+            stability_confidence = 1.0 - (result["frames_with_extra_people"] / max(result["total_frames_analyzed"], 1))
+            
+            # Weighted average of confidence factors
+            average_confidence = (
+                detection_confidence * 0.4 +  # Detection reliability
+                face_recognition_confidence * 0.4 +  # Face recognition accuracy
+                stability_confidence * 0.2  # Detection stability
+            )
+            
             return {
                 "score": result["score"],
                 "max_people_detected": max(seg["count"] for seg in result["people_detection_timeline"]),
@@ -198,7 +211,13 @@ class MultiPersonDetector:
                 "people_detection_timeline": result["people_detection_timeline"],
                 "different_faces_detected": result["different_faces_detected"],
                 "different_face_timestamps": result["different_face_timestamps"],
-                "has_different_faces": result["has_different_faces"]
+                "has_different_faces": result["has_different_faces"],
+                "average_confidence": round(average_confidence, 3),
+                "confidence_metrics": {
+                    "detection_confidence": round(detection_confidence, 3),
+                    "face_recognition_confidence": round(face_recognition_confidence, 3),
+                    "stability_confidence": round(stability_confidence, 3)
+                }
             }
         except Exception as e:
             logger.error(f"Error in multi-person analysis: {str(e)}")

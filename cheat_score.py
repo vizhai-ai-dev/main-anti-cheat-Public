@@ -36,21 +36,21 @@ class CheatScoreCalculator:
                 logger.info("Falling back to rule-based scoring")
                 self.use_xgboost = False
         
-        # Risk thresholds - Made more granular and strict
+        # Risk thresholds - Made more strict
         self.RISK_THRESHOLDS = {
-            "Very Low": 15,    # New threshold
-            "Low": 35,         # Increased from 20
-            "Medium": 55,      # Increased from 40
-            "High": 75,        # Increased from 60
-            "Very High": 85    # New threshold
+            "Very Low": 10,    # More strict
+            "Low": 25,         # More strict
+            "Medium": 45,      # More strict
+            "High": 65,        # More strict
+            "Very High": 80    # More strict
         }
         
-        # Feature weights - Adjusted for better accuracy
+        # Feature weights - Rebalanced for better accuracy
         self.WEIGHTS = {
-            "gaze": 0.35,      # Decreased from 0.40
-            "audio": 0.25,     # Same
-            "multi_person": 0.25,  # Increased from 0.20
-            "lip_sync": 0.15   # Same
+            "gaze": 0.50,          # Increased from 0.35 (most reliable indicator)
+            "multi_person": 0.35,  # Increased from 0.25 (critical violation)
+            "audio": 0.10,         # Decreased from 0.25 (as requested)
+            "lip_sync": 0.05       # Decreased from 0.15 (lowest weight as requested)
         }
     
     def _normalize_score(self, value, min_val=0, max_val=100):
@@ -60,6 +60,26 @@ class CheatScoreCalculator:
         if normalized < 50:
             return normalized * (normalized / 50) * (normalized / 50)  # Cubic penalty
         return normalized
+    
+    def _apply_confidence_weighting(self, score, confidence):
+        """Apply confidence weighting to module scores"""
+        if confidence < 0.7:
+            return score * 0.8  # Reduce impact of low-confidence detections
+        elif confidence > 0.9:
+            return score * 1.1  # Boost high-confidence detections
+        return score
+    
+    def _calculate_multi_person_score(self, multi_data):
+        """Enhanced multi-person scoring with zero tolerance"""
+        if multi_data.get("max_people_detected", 1) > 1:
+            return 0  # Immediate fail for multiple people
+        
+        if multi_data.get("has_different_faces", False):
+            return 0  # Immediate fail for face switching
+        
+        # Time-based penalty for brief multiple person detection
+        time_penalty = min(100, multi_data.get("time_with_multiple_people", 0) * 20)
+        return max(0, 100 - time_penalty)
     
     def _get_risk_level(self, score):
         """Determine risk level from score with more granular levels"""
@@ -189,10 +209,16 @@ class CheatScoreCalculator:
             off_screen_score = 100 - min(100, gaze_data.get("off_screen_count", 0) * 8)  # Increased penalty
             confidence_score = min(100, gaze_data.get("average_confidence", 0) * 100)
             time_score = 100 - min(100, gaze_data.get("off_screen_time_percentage", 0) * 2)
-            scores["gaze"] = self._normalize_score(
+            
+            # Apply confidence weighting to gaze score
+            gaze_score = self._normalize_score(
                 off_screen_score * 0.5 + 
                 confidence_score * 0.3 + 
                 time_score * 0.2
+            )
+            scores["gaze"] = self._apply_confidence_weighting(
+                gaze_score, 
+                gaze_data.get("average_confidence", 0.8)
             )
         else:
             scores["gaze"] = 100
@@ -203,25 +229,23 @@ class CheatScoreCalculator:
             speaker_score = 0 if audio_data.get("multiple_speakers", False) else 100
             typing_score = 100 - min(100, audio_data.get("keyboard_typing_count", 0) * 5)  # Increased penalty
             silence_score = 100 - min(100, audio_data.get("silence_percentage", 0) * 1.5)  # Increased penalty
-            scores["audio"] = self._normalize_score(
+            
+            # Apply confidence weighting to audio score
+            audio_score = self._normalize_score(
                 speaker_score * 0.5 + 
                 typing_score * 0.3 + 
                 silence_score * 0.2
             )
+            scores["audio"] = self._apply_confidence_weighting(
+                audio_score,
+                audio_data.get("confidence", 0.7)
+            )
         else:
             scores["audio"] = 100
         
-        # Calculate multi-person score with zero tolerance
+        # Calculate multi-person score using enhanced scoring
         if "multi_person" in results:
-            multi_data = results["multi_person"]
-            people_score = 0 if multi_data.get("max_people_detected", 1) > 1 else 100
-            time_score = 100 - min(100, multi_data.get("time_with_multiple_people", 0) * 10)  # Increased penalty
-            face_score = 0 if multi_data.get("has_different_faces", False) else 100
-            scores["multi_person"] = self._normalize_score(
-                people_score * 0.4 + 
-                time_score * 0.3 + 
-                face_score * 0.3
-            )
+            scores["multi_person"] = self._calculate_multi_person_score(results["multi_person"])
         else:
             scores["multi_person"] = 100
         
@@ -231,7 +255,12 @@ class CheatScoreCalculator:
             base_score = lip_sync_data.get("lip_sync_score", 100)
             if lip_sync_data.get("major_lip_desync_detected", False):
                 base_score *= 0.5  # 50% penalty for major desync
-            scores["lip_sync"] = self._normalize_score(base_score)
+            
+            # Apply confidence weighting to lip sync score
+            scores["lip_sync"] = self._apply_confidence_weighting(
+                self._normalize_score(base_score),
+                lip_sync_data.get("confidence", 0.7)
+            )
         else:
             scores["lip_sync"] = 100
         
