@@ -1,25 +1,120 @@
-version: '3.8'
-
 services:
-  backend:
+  # Main AI Proctoring API Service
+  proctoring-api:
     build:
       context: .
-      dockerfile: Dockerfile.backend
-    container_name: vizhai-backend
-    restart: unless-stopped
-    volumes:
-      - uploaded_videos:/app/uploaded_videos
+      dockerfile: Dockerfile
+    container_name: ai-proctoring-api
     ports:
-      - "8000:8000"
+      - "5000:5000"
     environment:
+      - FLASK_ENV=production
+      - FLASK_DEBUG=0
       - PYTHONUNBUFFERED=1
+    volumes:
+      # Mount models directory for persistent model storage
+      - ./models:/app/models
+      # Mount uploads directory for file uploads
+      - uploads_data:/app/uploads
+      # Mount temp directory for temporary files
+      - temp_data:/app/temp
+    restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 20s
+      start_period: 40s
+    networks:
+      - proctoring-network
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: '2.0'
+        reservations:
+          memory: 2G
+          cpus: '1.0'
+
+  # Streamlit UI Service (optional)
+  proctoring-ui:
+    build:
+      context: .
+      dockerfile: Dockerfile.streamlit
+    container_name: ai-proctoring-ui
+    ports:
+      - "8501:8501"
+    environment:
+      - PYTHONUNBUFFERED=1
+      - API_BASE_URL=http://proctoring-api:5000
+    volumes:
+      - ./models:/app/models
+      - uploads_data:/app/uploads
+    restart: unless-stopped
+    depends_on:
+      - proctoring-api
+    networks:
+      - proctoring-network
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.0'
+        reservations:
+          memory: 1G
+          cpus: '0.5'
+
+  # Redis for caching (optional)
+  redis:
+    image: redis:7-alpine
+    container_name: ai-proctoring-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    networks:
+      - proctoring-network
+    command: redis-server --appendonly yes
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+
+  # Nginx reverse proxy (optional)
+  nginx:
+    image: nginx:alpine
+    container_name: ai-proctoring-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+    restart: unless-stopped
+    depends_on:
+      - proctoring-api
+      - proctoring-ui
+    networks:
+      - proctoring-network
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.5'
 
 volumes:
-  uploaded_videos:
-    driver: local 
+  uploads_data:
+    driver: local
+  temp_data:
+    driver: local
+  redis_data:
+    driver: local
+
+networks:
+  proctoring-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16 

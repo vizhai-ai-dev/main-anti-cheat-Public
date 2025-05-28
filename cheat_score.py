@@ -1,397 +1,435 @@
-import logging
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+#!/usr/bin/env python3
+"""
+Cheat Score Calculator Module
+
+This module computes a cheating probability score based on inputs from:
+- Gaze tracking (eye movement patterns)
+- Lip sync detection (audio-visual synchronization)
+- Multiple person detection (unauthorized persons)
+- Audio analysis (background noise, multiple speakers)
+
+The score ranges from 0 (safe/no cheating detected) to 1 (high risk/likely cheating).
+"""
+
 import numpy as np
+import logging
+from typing import Dict, Any, List, Optional, Union
+from dataclasses import dataclass
+from flask import Blueprint, request, jsonify
 import json
-from typing import Dict, List, Optional
 
-# Try to import xgboost, but make it optional
-try:
-    import xgboost as xgb
-    XGBOOST_AVAILABLE = True
-except ImportError:
-    XGBOOST_AVAILABLE = False
-    logging.warning("XGBoost not available, falling back to rule-based scoring only")
-
-# Configure logging
+# Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Initialize blueprint for Flask integration
+cheat_score_blueprint = Blueprint('cheat_score', __name__)
+
+@dataclass
+class CheatScoreWeights:
+    """Configuration class for cheat score calculation weights"""
+    gaze_weight: float = 0.25          # Weight for gaze tracking analysis
+    lip_sync_weight: float = 0.20      # Weight for lip sync analysis
+    person_detection_weight: float = 0.30  # Weight for multiple person detection
+    audio_analysis_weight: float = 0.25    # Weight for audio analysis
+    
+    # Gaze-specific weights
+    gaze_off_screen_penalty: float = 0.8   # Penalty for looking away from screen
+    gaze_suspicious_pattern_penalty: float = 0.6  # Penalty for suspicious gaze patterns
+    
+    # Person detection weights
+    multiple_person_penalty: float = 1.0   # Maximum penalty for multiple people
+    face_person_mismatch_penalty: float = 0.7  # Penalty when face count != person count
+    
+    # Audio analysis weights
+    multiple_speaker_penalty: float = 0.9  # Penalty for multiple speakers detected
+    background_noise_penalty: float = 0.4  # Penalty for excessive background noise
+    silence_penalty: float = 0.3           # Penalty for prolonged silence
+    
+    # Lip sync weights
+    poor_lip_sync_penalty: float = 0.8     # Penalty for poor audio-visual sync
+
 class CheatScoreCalculator:
-    def __init__(self, use_xgboost=False):
-        # Check if xgboost is requested but not available
-        if use_xgboost and not XGBOOST_AVAILABLE:
-            logger.warning("XGBoost requested but not available, falling back to rule-based scoring")
-            use_xgboost = False
+    """Main class for calculating cheating probability scores"""
+    
+    def __init__(self, weights: Optional[CheatScoreWeights] = None):
+        """Initialize the cheat score calculator
+        
+        Args:
+            weights: Custom weights configuration. Uses default if None.
+        """
+        self.weights = weights or CheatScoreWeights()
+        self.score_history: List[float] = []
+        self.max_history_length = 100
+    
+    def _normalize_score(self, score: float) -> float:
+        """Normalize score to 0-1 range"""
+        return max(0.0, min(1.0, score))
+    
+    def _analyze_gaze_data(self, gaze_data: Dict[str, Any]) -> float:
+        """Analyze gaze tracking data and return risk score
+        
+        Args:
+            gaze_data: Dictionary containing gaze analysis results
+            Expected format:
+            {
+                'direction': str,  # 'center', 'left', 'right', 'up', 'down', 'unknown', 'eyes_closed'
+                'confidence': float,  # Optional confidence score
+                'off_screen_duration': float,  # Optional: seconds looking away
+                'suspicious_patterns': int,  # Optional: count of suspicious patterns
+            }
+        
+        Returns:
+            Risk score between 0 and 1
+        """
+        if not gaze_data:
+            return 0.5  # Neutral score if no data
+        
+        risk_score = 0.0
+        direction = gaze_data.get('direction', 'unknown')
+        
+        # Base penalties for different gaze directions
+        direction_penalties = {
+            'center': 0.0,      # Normal, looking at screen
+            'left': 0.3,        # Moderate risk
+            'right': 0.3,       # Moderate risk
+            'up': 0.2,          # Low risk (thinking)
+            'down': 0.1,        # Low risk (normal reading/thinking behavior)
+            'unknown': 0.6,     # High risk (face not detected)
+            'eyes_closed': 0.3  # Moderate risk (could be thinking or avoiding detection)
+        }
+        
+        risk_score += direction_penalties.get(direction, 0.5)
+        
+        # Additional penalties
+        if 'off_screen_duration' in gaze_data:
+            # Penalty increases with time spent looking away
+            off_screen_time = gaze_data['off_screen_duration']
+            if off_screen_time > 5:  # More than 5 seconds
+                risk_score += self.weights.gaze_off_screen_penalty * min(1.0, off_screen_time / 30)
+        
+        if 'suspicious_patterns' in gaze_data:
+            # Penalty for suspicious gaze patterns
+            pattern_count = gaze_data['suspicious_patterns']
+            if pattern_count > 0:
+                risk_score += self.weights.gaze_suspicious_pattern_penalty * min(1.0, pattern_count / 10)
+        
+        return self._normalize_score(risk_score)
+    
+    def _analyze_lip_sync_data(self, lip_sync_data: Dict[str, Any]) -> float:
+        """Analyze lip sync data and return risk score
+        
+        Args:
+            lip_sync_data: Dictionary containing lip sync analysis results
+            Expected format:
+            {
+                'is_synced': bool,  # Whether audio and video are synchronized
+                'sync_score': float,  # Synchronization quality score (0-1)
+                'confidence': float,  # Optional confidence in the analysis
+            }
+        
+        Returns:
+            Risk score between 0 and 1
+        """
+        if not lip_sync_data:
+            return 0.3  # Moderate risk if no data
+        
+        risk_score = 0.0
+        
+        # Check if lip sync is poor
+        is_synced = lip_sync_data.get('is_synced', True)
+        sync_score = lip_sync_data.get('sync_score', 1.0)
+        
+        if not is_synced:
+            risk_score += self.weights.poor_lip_sync_penalty
+        else:
+            # Gradual penalty based on sync quality
+            risk_score += self.weights.poor_lip_sync_penalty * (1.0 - sync_score)
+        
+        return self._normalize_score(risk_score)
+    
+    def _analyze_person_detection_data(self, person_data: Dict[str, Any]) -> float:
+        """Analyze person detection data and return risk score
+        
+        Args:
+            person_data: Dictionary containing person detection results
+            Expected format:
+            {
+                'people_count': int,  # Number of people detected
+                'face_count': int,    # Number of faces detected
+                'confidence': float,  # Optional detection confidence
+            }
+        
+        Returns:
+            Risk score between 0 and 1
+        """
+        if not person_data:
+            return 0.4  # Moderate risk if no data
+        
+        risk_score = 0.0
+        people_count = person_data.get('people_count', 1)
+        face_count = person_data.get('face_count', 1)
+        
+        # Penalty for multiple people
+        if people_count > 1:
+            # Exponential penalty for more people
+            excess_people = people_count - 1
+            risk_score += self.weights.multiple_person_penalty * min(1.0, excess_people / 3)
+        
+        # Penalty for mismatch between people and faces
+        if abs(people_count - face_count) > 0:
+            mismatch_ratio = abs(people_count - face_count) / max(people_count, face_count, 1)
+            risk_score += self.weights.face_person_mismatch_penalty * mismatch_ratio
+        
+        # Penalty if no people detected (camera issues or avoidance)
+        if people_count == 0:
+            risk_score += 0.6
+        
+        return self._normalize_score(risk_score)
+    
+    def _analyze_audio_data(self, audio_data: Dict[str, Any]) -> float:
+        """Analyze audio analysis data and return risk score
+        
+        Args:
+            audio_data: Dictionary containing audio analysis results
+            Expected format:
+            {
+                'multiple_speakers': bool,
+                'speaker_confidence': float,
+                'has_background_noise': bool,
+                'noise_level': float,
+                'has_prolonged_silence': bool,
+                'silence_periods': List[Tuple[float, float]],
+                'overall_quality': float,  # Optional overall audio quality score
+            }
+        
+        Returns:
+            Risk score between 0 and 1
+        """
+        if not audio_data:
+            return 0.3  # Moderate risk if no data
+        
+        risk_score = 0.0
+        
+        # Multiple speakers detection
+        if audio_data.get('multiple_speakers', False):
+            speaker_confidence = audio_data.get('speaker_confidence', 1.0)
+            risk_score += self.weights.multiple_speaker_penalty * speaker_confidence
+        
+        # Background noise analysis
+        if audio_data.get('has_background_noise', False):
+            noise_level = audio_data.get('noise_level', 0.5)
+            risk_score += self.weights.background_noise_penalty * noise_level
+        
+        # Prolonged silence analysis
+        if audio_data.get('has_prolonged_silence', False):
+            silence_periods = audio_data.get('silence_periods', [])
+            total_silence_duration = sum(end - start for start, end in silence_periods)
+            # Penalty increases with total silence duration
+            silence_penalty = min(1.0, total_silence_duration / 60)  # Normalize by 1 minute
+            risk_score += self.weights.silence_penalty * silence_penalty
+        
+        return self._normalize_score(risk_score)
+    
+    def calculate_cheat_score(self, inputs: Dict[str, Any]) -> float:
+        """Calculate overall cheating probability score
+        
+        Args:
+            inputs: Dictionary containing analysis results from all modules
+            Expected format:
+            {
+                'gaze_data': Dict,      # From gaze tracking module
+                'lip_sync_data': Dict,  # From lip sync detection module
+                'person_data': Dict,    # From person detection module
+                'audio_data': Dict,     # From audio analysis module
+                'timestamp': float,     # Optional timestamp
+                'session_id': str,      # Optional session identifier
+            }
+        
+        Returns:
+            Cheating probability score between 0 (safe) and 1 (high risk)
+        """
+        try:
+            # Extract individual analysis results
+            gaze_data = inputs.get('gaze_data', {})
+            lip_sync_data = inputs.get('lip_sync_data', {})
+            person_data = inputs.get('person_data', {})
+            audio_data = inputs.get('audio_data', {})
             
-        self.use_xgboost = use_xgboost
-        if use_xgboost:
-            # Load XGBoost model
-            try:
-                self.model = xgb.Booster()
-                self.model.load_model('models/cheat_score_model.json')
-                logger.info("XGBoost model loaded successfully")
-            except Exception as e:
-                logger.error(f"Error loading XGBoost model: {str(e)}")
-                logger.info("Falling back to rule-based scoring")
-                self.use_xgboost = False
-        
-        # Risk thresholds - Made more strict
-        self.RISK_THRESHOLDS = {
-            "Very Low": 10,    # More strict
-            "Low": 25,         # More strict
-            "Medium": 45,      # More strict
-            "High": 65,        # More strict
-            "Very High": 80    # More strict
-        }
-        
-        # Feature weights - Rebalanced for better accuracy
-        self.WEIGHTS = {
-            "gaze": 0.50,          # Increased from 0.35 (most reliable indicator)
-            "multi_person": 0.35,  # Increased from 0.25 (critical violation)
-            "audio": 0.10,         # Decreased from 0.25 (as requested)
-            "lip_sync": 0.05       # Decreased from 0.15 (lowest weight as requested)
-        }
+            # Calculate individual risk scores
+            gaze_risk = self._analyze_gaze_data(gaze_data)
+            lip_sync_risk = self._analyze_lip_sync_data(lip_sync_data)
+            person_risk = self._analyze_person_detection_data(person_data)
+            audio_risk = self._analyze_audio_data(audio_data)
+            
+            # Calculate weighted overall score
+            overall_score = (
+                gaze_risk * self.weights.gaze_weight +
+                lip_sync_risk * self.weights.lip_sync_weight +
+                person_risk * self.weights.person_detection_weight +
+                audio_risk * self.weights.audio_analysis_weight
+            )
+            
+            # Normalize the final score
+            final_score = self._normalize_score(overall_score)
+            
+            # Add to history for trend analysis
+            self.score_history.append(final_score)
+            if len(self.score_history) > self.max_history_length:
+                self.score_history.pop(0)
+            
+            # Log the calculation for debugging
+            logger.info(f"Cheat score calculated: {final_score:.3f} "
+                       f"(gaze: {gaze_risk:.3f}, lip_sync: {lip_sync_risk:.3f}, "
+                       f"person: {person_risk:.3f}, audio: {audio_risk:.3f})")
+            
+            return final_score
+            
+        except Exception as e:
+            logger.error(f"Error calculating cheat score: {str(e)}")
+            return 0.5  # Return neutral score on error
     
-    def _normalize_score(self, value, min_val=0, max_val=100):
-        """Normalize values to 0-100 scale with improved exponential penalty"""
-        normalized = max(min(100, float(value)), 0)
-        # Apply improved exponential penalty for lower scores
-        if normalized < 50:
-            return normalized * (normalized / 50) * (normalized / 50)  # Cubic penalty
-        return normalized
-    
-    def _apply_confidence_weighting(self, score, confidence):
-        """Apply confidence weighting to module scores"""
-        if confidence < 0.7:
-            return score * 0.8  # Reduce impact of low-confidence detections
-        elif confidence > 0.9:
-            return score * 1.1  # Boost high-confidence detections
-        return score
-    
-    def _calculate_multi_person_score(self, multi_data):
-        """Enhanced multi-person scoring with zero tolerance"""
-        if multi_data.get("max_people_detected", 1) > 1:
-            return 0  # Immediate fail for multiple people
+    def get_risk_level(self, score: float) -> str:
+        """Convert numerical score to risk level description
         
-        if multi_data.get("has_different_faces", False):
-            return 0  # Immediate fail for face switching
-        
-        # Time-based penalty for brief multiple person detection
-        time_penalty = min(100, multi_data.get("time_with_multiple_people", 0) * 20)
-        return max(0, 100 - time_penalty)
-    
-    def _get_risk_level(self, score):
-        """Determine risk level from score with more granular levels"""
-        if score < self.RISK_THRESHOLDS["Low"]:
+        Args:
+            score: Cheat score between 0 and 1
+            
+        Returns:
+            Risk level as string
+        """
+        if score < 0.2:
             return "Very Low"
-        elif score < self.RISK_THRESHOLDS["Medium"]:
+        elif score < 0.4:
             return "Low"
-        elif score < self.RISK_THRESHOLDS["High"]:
+        elif score < 0.6:
             return "Medium"
-        elif score < 80:
+        elif score < 0.8:
             return "High"
         else:
             return "Very High"
     
-    def _generate_reasons(self, results):
-        """Generate detailed reasons for flagging with improved severity levels"""
-        reasons = []
+    def get_score_trend(self, window_size: int = 10) -> Dict[str, float]:
+        """Analyze recent score trends
         
-        # Gaze reasons with improved thresholds
-        if "gaze" in results:
-            gaze = results["gaze"]
-            off_screen_count = gaze.get("off_screen_count", 0)
-            if off_screen_count > 3:  # More strict threshold
-                severity = "critical" if off_screen_count > 10 else "warning"
-                reasons.append({
-                    "text": f"Looked away from screen {off_screen_count} times",
-                    "severity": severity,
-                    "module": "gaze",
-                    "confidence": 0.95
-                })
-            if gaze.get("average_confidence", 0) < 0.8:  # More strict threshold
-                reasons.append({
-                    "text": "Inconsistent gaze tracking detected",
-                    "severity": "warning",
-                    "module": "gaze",
-                    "confidence": 0.85
-                })
-            if gaze.get("off_screen_time_percentage", 0) > 15:  # More strict threshold
-                reasons.append({
-                    "text": f"Spent {gaze.get('off_screen_time_percentage'):.1f}% of time looking away",
-                    "severity": "critical",
-                    "module": "gaze",
-                    "confidence": 0.9
-                })
-        
-        # Audio reasons with improved thresholds
-        if "audio" in results:
-            audio = results["audio"]
-            if audio.get("multiple_speakers", False):
-                reasons.append({
-                    "text": "Multiple speakers detected",
-                    "severity": "critical",
-                    "module": "audio",
-                    "confidence": 0.95
-                })
-            keyboard_count = audio.get("keyboard_typing_count", 0)
-            if keyboard_count > 3:  # More strict threshold
-                severity = "critical" if keyboard_count > 8 else "warning"
-                reasons.append({
-                    "text": f"Excessive keyboard typing detected ({keyboard_count} instances)",
-                    "severity": severity,
-                    "module": "audio",
-                    "confidence": 0.9
-                })
-            if audio.get("silence_percentage", 0) > 25:  # More strict threshold
-                reasons.append({
-                    "text": f"High percentage of silence ({audio.get('silence_percentage'):.1f}%)",
-                    "severity": "warning",
-                    "module": "audio",
-                    "confidence": 0.85
-                })
-        
-        # Multi-person reasons with improved thresholds
-        if "multi_person" in results:
-            multi = results["multi_person"]
-            if multi.get("max_people_detected", 0) > 1:
-                reasons.append({
-                    "text": f"Multiple people detected (max: {multi.get('max_people_detected')})",
-                    "severity": "critical",
-                    "module": "multi_person",
-                    "confidence": 0.95
-                })
-            if multi.get("time_with_multiple_people", 0) > 3:  # More strict threshold
-                reasons.append({
-                    "text": f"Multiple people present for {multi.get('time_with_multiple_people'):.1f} seconds",
-                    "severity": "critical",
-                    "module": "multi_person",
-                    "confidence": 0.9
-                })
-            if multi.get("has_different_faces", False):
-                reasons.append({
-                    "text": f"{multi.get('different_faces_detected', 0)} different faces detected",
-                    "severity": "critical",
-                    "module": "multi_person",
-                    "confidence": 0.95
-                })
-        
-        # Lip sync reasons with improved thresholds
-        if "lip_sync" in results:
-            lip_sync = results["lip_sync"]
-            if lip_sync.get("major_lip_desync_detected", False):
-                reasons.append({
-                    "text": "Major lip-sync desynchronization detected",
-                    "severity": "critical",
-                    "module": "lip_sync",
-                    "confidence": 0.9
-                })
-            lip_score = lip_sync.get("lip_sync_score", 100)
-            if lip_score < 85:  # More strict threshold
-                severity = "critical" if lip_score < 70 else "warning"
-                reasons.append({
-                    "text": f"Poor lip-sync score: {lip_score:.1f}",
-                    "severity": severity,
-                    "module": "lip_sync",
-                    "confidence": 0.85
-                })
-        
-        return reasons
-    
-    def _rule_based_scoring(self, results):
-        """Calculate cheating score using improved rule-based approach"""
-        scores = {}
-        
-        # Calculate gaze score with exponential penalties
-        if "gaze" in results:
-            gaze_data = results["gaze"]
-            off_screen_score = 100 - min(100, gaze_data.get("off_screen_count", 0) * 8)  # Increased penalty
-            confidence_score = min(100, gaze_data.get("average_confidence", 0) * 100)
-            time_score = 100 - min(100, gaze_data.get("off_screen_time_percentage", 0) * 2)
+        Args:
+            window_size: Number of recent scores to analyze
             
-            # Apply confidence weighting to gaze score
-            gaze_score = self._normalize_score(
-                off_screen_score * 0.5 + 
-                confidence_score * 0.3 + 
-                time_score * 0.2
-            )
-            scores["gaze"] = self._apply_confidence_weighting(
-                gaze_score, 
-                gaze_data.get("average_confidence", 0.8)
-            )
-        else:
-            scores["gaze"] = 100
+        Returns:
+            Dictionary with trend analysis
+        """
+        if len(self.score_history) < 2:
+            return {"trend": "insufficient_data", "average": 0.0, "variance": 0.0}
         
-        # Calculate audio score with stricter penalties
-        if "audio" in results:
-            audio_data = results["audio"]
-            speaker_score = 0 if audio_data.get("multiple_speakers", False) else 100
-            typing_score = 100 - min(100, audio_data.get("keyboard_typing_count", 0) * 5)  # Increased penalty
-            silence_score = 100 - min(100, audio_data.get("silence_percentage", 0) * 1.5)  # Increased penalty
+        recent_scores = self.score_history[-window_size:]
+        average_score = np.mean(recent_scores)
+        variance = np.var(recent_scores)
+        
+        # Determine trend
+        if len(recent_scores) >= 3:
+            first_half = np.mean(recent_scores[:len(recent_scores)//2])
+            second_half = np.mean(recent_scores[len(recent_scores)//2:])
             
-            # Apply confidence weighting to audio score
-            audio_score = self._normalize_score(
-                speaker_score * 0.5 + 
-                typing_score * 0.3 + 
-                silence_score * 0.2
-            )
-            scores["audio"] = self._apply_confidence_weighting(
-                audio_score,
-                audio_data.get("confidence", 0.7)
-            )
+            if second_half > first_half + 0.1:
+                trend = "increasing"
+            elif second_half < first_half - 0.1:
+                trend = "decreasing"
+            else:
+                trend = "stable"
         else:
-            scores["audio"] = 100
-        
-        # Calculate multi-person score using enhanced scoring
-        if "multi_person" in results:
-            scores["multi_person"] = self._calculate_multi_person_score(results["multi_person"])
-        else:
-            scores["multi_person"] = 100
-        
-        # Calculate lip sync score with stricter penalties
-        if "lip_sync" in results:
-            lip_sync_data = results["lip_sync"]
-            base_score = lip_sync_data.get("lip_sync_score", 100)
-            if lip_sync_data.get("major_lip_desync_detected", False):
-                base_score *= 0.5  # 50% penalty for major desync
-            
-            # Apply confidence weighting to lip sync score
-            scores["lip_sync"] = self._apply_confidence_weighting(
-                self._normalize_score(base_score),
-                lip_sync_data.get("confidence", 0.7)
-            )
-        else:
-            scores["lip_sync"] = 100
-        
-        # Calculate final score with adjusted weights
-        final_score = (
-            scores["gaze"] * self.WEIGHTS["gaze"] +
-            scores["audio"] * self.WEIGHTS["audio"] +
-            scores["multi_person"] * self.WEIGHTS["multi_person"] +
-            scores["lip_sync"] * self.WEIGHTS["lip_sync"]
-        )
-        
-        # Apply exponential penalty to final score
-        final_score = self._normalize_score(final_score)
+            trend = "stable"
         
         return {
-            "final_score": round(final_score, 1),
-            "risk": self._get_risk_level(final_score),
-            "reasons": self._generate_reasons(results),
-            "module_scores": scores
+            "trend": trend,
+            "average": float(average_score),
+            "variance": float(variance),
+            "sample_size": len(recent_scores)
         }
+
+# Global calculator instance
+_calculator = CheatScoreCalculator()
+
+def calculate_cheat_score(inputs: Dict[str, Any]) -> float:
+    """Convenience function for calculating cheat score
     
-    def _xgboost_scoring(self, results):
-        """Calculate cheating score using XGBoost model"""
-        try:
-            if not XGBOOST_AVAILABLE:
-                logger.warning("XGBoost not available, falling back to rule-based scoring")
-                return self._rule_based_scoring(results)
-                
-            # Extract features from results
-            features = []
-            
-            # Gaze features
-            gaze_data = results.get("gaze", {})
-            features.append(gaze_data.get("off_screen_count", 0))
-            features.append(gaze_data.get("average_confidence", 0))
-            
-            # Audio features
-            audio_data = results.get("audio", {})
-            features.append(1 if audio_data.get("multiple_speakers", False) else 0)
-            features.append(audio_data.get("keyboard_typing_count", 0))
-            features.append(audio_data.get("silence_percentage", 0))
-            
-            # Multi-person features
-            multi_data = results.get("multi_person", {})
-            features.append(multi_data.get("max_people_detected", 0))
-            features.append(multi_data.get("time_with_multiple_people", 0))
-            
-            # Lip sync features
-            lip_sync_data = results.get("lip_sync", {})
-            features.append(lip_sync_data.get("lip_sync_score", 100))
-            features.append(1 if lip_sync_data.get("major_lip_desync_detected", False) else 0)
-            
-            # Convert features to DMatrix
-            dmatrix = xgb.DMatrix(np.array([features]))
-            
-            # Predict score
-            cheat_score = float(self.model.predict(dmatrix)[0])
-            
-            # Ensure score is in range 0-100
-            cheat_score = self._normalize_score(cheat_score)
-            
-            return cheat_score
-        except Exception as e:
-            logger.error(f"Error in XGBoost scoring: {str(e)}")
-            logger.info("Falling back to rule-based scoring")
-            return self._rule_based_scoring(results)
+    Args:
+        inputs: Dictionary containing analysis results from all modules
+        
+    Returns:
+        Cheating probability score between 0 (safe) and 1 (high risk)
+    """
+    return _calculator.calculate_cheat_score(inputs)
+
+def get_risk_level(score: float) -> str:
+    """Convenience function for getting risk level description"""
+    return _calculator.get_risk_level(score)
+
+def get_score_trend(window_size: int = 10) -> Dict[str, float]:
+    """Convenience function for getting score trend analysis"""
+    return _calculator.get_score_trend(window_size)
+
+# Flask routes for web API integration
+@cheat_score_blueprint.route('/cheat_score', methods=['POST'])
+def cheat_score_endpoint():
+    """Flask route for cheat score calculation
     
-    def compute_cheating_score(self, results_dict):
-        """Main function to compute cheating score"""
-        try:
-            # Calculate score based on model choice
-            if self.use_xgboost:
-                final_score = self._xgboost_scoring(results_dict)
-            else:
-                final_score = self._rule_based_scoring(results_dict)
-            
-            # Round score to 1 decimal place
-            final_score = round(final_score, 1)
-            
-            # Determine risk level
-            risk = self._get_risk_level(final_score)
-            
-            # Generate reasons
-            reasons = self._generate_reasons(results_dict)
-            
-            return {
-                "final_score": final_score,
-                "risk": risk,
-                "reasons": reasons
-            }
-        except Exception as e:
-            logger.error(f"Error computing cheat score: {str(e)}")
-            import traceback
-            logger.error(traceback.format_exc())
-            raise
-
-    async def compute_score(self, results: Dict) -> Dict:
-        """
-        Compute the final cheat score from all module results.
-        This is an async wrapper around _rule_based_scoring.
-        """
-        try:
-            return self._rule_based_scoring(results)
-        except Exception as e:
-            logger.error(f"Error computing cheat score: {str(e)}")
-            raise
-
-# FastAPI implementation
-app = FastAPI()
-
-class CheatScoreRequest(BaseModel):
-    gaze: Optional[Dict] = None
-    audio: Optional[Dict] = None
-    multi_person: Optional[Dict] = None
-    lip_sync: Optional[Dict] = None
-
-@app.post("/cheat_score")
-async def cheat_score_endpoint(request: CheatScoreRequest):
+    Expects JSON with analysis data from all modules
+    Returns cheat score and risk assessment
+    """
     try:
-        # Convert request to dictionary
-        results_dict = request.dict(exclude_none=True)
+        if not request.json:
+            return jsonify({"error": "No JSON data provided"}), 400
         
         # Calculate cheat score
-        calculator = CheatScoreCalculator(use_xgboost=False)  # Use rule-based scoring by default
-        result = calculator.compute_cheating_score(results_dict)
+        score = calculate_cheat_score(request.json)
+        risk_level = get_risk_level(score)
+        trend_analysis = get_score_trend()
         
-        return result
+        response = {
+            "cheat_score": score,
+            "risk_level": risk_level,
+            "trend_analysis": trend_analysis,
+            "timestamp": request.json.get('timestamp'),
+            "session_id": request.json.get('session_id')
+        }
+        
+        return jsonify(response)
+        
     except Exception as e:
-        logger.error(f"Error processing request: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Error in cheat score endpoint: {str(e)}")
+        return jsonify({"error": "Internal server error"}), 500
+
+@cheat_score_blueprint.route('/cheat_score/config', methods=['GET', 'POST'])
+def cheat_score_config():
+    """Flask route for getting/setting cheat score configuration"""
+    global _calculator
+    
+    if request.method == 'GET':
+        # Return current configuration
+        weights = _calculator.weights
+        config = {
+            "gaze_weight": weights.gaze_weight,
+            "lip_sync_weight": weights.lip_sync_weight,
+            "person_detection_weight": weights.person_detection_weight,
+            "audio_analysis_weight": weights.audio_analysis_weight,
+            "gaze_off_screen_penalty": weights.gaze_off_screen_penalty,
+            "multiple_person_penalty": weights.multiple_person_penalty,
+            "multiple_speaker_penalty": weights.multiple_speaker_penalty,
+            "poor_lip_sync_penalty": weights.poor_lip_sync_penalty
+        }
+        return jsonify(config)
+    
+    elif request.method == 'POST':
+        # Update configuration
+        try:
+            new_weights = CheatScoreWeights(**request.json)
+            _calculator.weights = new_weights
+            return jsonify({"message": "Configuration updated successfully"})
+        except Exception as e:
+            return jsonify({"error": f"Invalid configuration: {str(e)}"}), 400
 
 if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8005) 
+    # This module is designed to be imported and used by other modules
+    print("Cheat Score Calculator Module")
+    print("Import this module to use calculate_cheat_score() function")
+    print("Example: from cheat_score import calculate_cheat_score") 

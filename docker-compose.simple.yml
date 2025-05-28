@@ -1,0 +1,41 @@
+services:
+  # Main AI Proctoring API Service
+  proctoring-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ai-proctoring-api
+    ports:
+      - "5000:5000"
+    environment:
+      - FLASK_ENV=production
+      - FLASK_DEBUG=0
+      - PYTHONUNBUFFERED=1
+    volumes:
+      # Mount models directory for persistent model storage
+      - ./models:/app/models
+      # Mount uploads directory for file uploads
+      - uploads_data:/app/uploads
+      # Mount temp directory for temporary files
+      - temp_data:/app/temp
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: '2.0'
+        reservations:
+          memory: 2G
+          cpus: '1.0'
+
+volumes:
+  uploads_data:
+    driver: local
+  temp_data:
+    driver: local 
